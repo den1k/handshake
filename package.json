@@ -1,0 +1,11 @@
+{
+  "name": "handshake",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env server.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

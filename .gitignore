@@ -1,0 +1,7 @@
+# Secrets and local data: never commit
+.env
+.env.*
+!.env.example
+*.swp
+data/
+.DS_Store
