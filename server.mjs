@@ -153,7 +153,7 @@ const q = {
     FROM invites i JOIN ledgers l ON l.id = i.ledger_id JOIN users u ON u.id = i.created_by WHERE i.token = ?`),
   useInvite: sql.prepare('UPDATE invites SET used_by = ?, used_at = ? WHERE token = ? AND used_by IS NULL'),
   addEntry: sql.prepare('INSERT INTO entries (id, ledger_id, author_id, created_at, required, doc) VALUES (?, ?, ?, ?, ?, ?)'),
-  entry: sql.prepare('SELECT ledger_id, author_id, required FROM entries WHERE id = ?'),
+  entry: sql.prepare('SELECT ledger_id, author_id, required, doc FROM entries WHERE id = ?'),
   entries: sql.prepare('SELECT id, author_id, created_at, required, doc FROM entries WHERE ledger_id = ? ORDER BY created_at, id'),
   entryIds: sql.prepare('SELECT id FROM entries WHERE ledger_id = ?'),
   agree: sql.prepare('INSERT OR IGNORE INTO entry_agreements (entry_id, user_id, at) VALUES (?, ?, ?)'),
@@ -455,7 +455,11 @@ async function askModel(prompt, res) {
 const clientIp = req => String((TRUST_PROXY && String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '').slice(0, 64);
 const clientUa = req => String(req.headers['user-agent'] || '').slice(0, 300);
 const ledgerStatement = (l, count, head) => `I have read the rules recorded in the agreement “${l.name}” (${count} entr${count === 1 ? 'y' : 'ies'}, fingerprint ${head}). I intend to be legally bound by every rule in it that is in force, and by each rule I sign from now on${l.governing_law ? `, under ${l.governing_law}` : ''}. I am signing electronically.`;
-const entryStatement = (l, n, hash) => `I intend to be legally bound by § ${n} of the agreement “${l.name}” exactly as written (fingerprint ${hash})${l.governing_law ? `, under ${l.governing_law}` : ''}. I am signing electronically.`;
+// A rule in a legally binding agreement can carry an effective date: a calendar day, from the start of that day UTC.
+// It is part of the recorded text, so the fingerprint and every signature cover it.
+const isDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v;
+const longDay = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+const entryStatement = (l, n, hash, eff) => `I intend to be legally bound by § ${n} of the agreement “${l.name}” exactly as written (fingerprint ${hash})${eff ? `, effective from ${longDay(eff)}` : ''}${l.governing_law ? `, under ${l.governing_law}` : ''}. I am signing electronically.`;
 // What a signature in a binding ledger must carry from the page.
 function signatureFrom(body) {
   const name = typeof body.typedName === 'string' ? body.typedName.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
@@ -506,7 +510,7 @@ function mailIfComplete(lid, eid) {
   const req = neededFor(lid, ent, signersOf(lid, eid));
   const l = q.ledger.get(lid), doc = JSON.parse(q.fullEntries.all(lid).find(x => x.id === eid).doc), n = entryNumber(lid, eid);
   sendMail({ to: req.map(u => (q.user.get(u) || {}).email), subject: `Signed by everyone: § ${n} · ${doc.title || 'Untitled'} (${l.name})`,
-    text: `Everyone has signed § ${n} of “${l.name}”. It is now in effect.\n\n${doc.text}\n\nThe certificate is attached as the HTML version of this email, and online at ${BASE_URL}/certificate/${lid}/${eid}`,
+    text: `Everyone has signed § ${n} of “${l.name}”. ${doc.effectiveOn > now().slice(0, 10) ? `It takes effect on ${longDay(doc.effectiveOn)}.` : 'It is now in effect.'}\n\n${doc.text}\n\nThe certificate is attached as the HTML version of this email, and online at ${BASE_URL}/certificate/${lid}/${eid}`,
     html: certificateHtml(lid, eid).html });
 }
 
@@ -538,6 +542,7 @@ function cleanDoc(doc, lid) {
   const ids = new Set(q.entryIds.all(lid).map(r => r.id));
   const own = v => Array.isArray(v) ? [...new Set(v.map(String))].filter(id => ids.has(id)) : [];
   const s = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
+  const eff = q.ledger.get(lid).binding_since && isDay(doc.effectiveOn) ? doc.effectiveOn : '';
   return {
     kind: doc.kind === 'repeal' ? 'repeal' : 'rule',
     title: s(doc.title, 120), text: s(doc.text, 20000), draft: s(doc.draft, 20000),
@@ -545,6 +550,7 @@ function cleanDoc(doc, lid) {
     relations: (Array.isArray(doc.relations) ? doc.relations : []).filter(r => r && ids.has(String(r.ruleId))).slice(0, 50).map(r => ({
       ruleId: String(r.ruleId), kind: s(r.kind, 20), explanation: s(r.explanation, 600), quoteOld: s(r.quoteOld, 300), quoteNew: s(r.quoteNew, 300), resolution: s(r.resolution, 20) })),
     edgeCases: (Array.isArray(doc.edgeCases) ? doc.edgeCases : []).map(c => s(c, 600)).filter(Boolean).slice(0, 10),
+    ...(eff ? { effectiveOn: eff } : {}),
   };
 }
 
@@ -570,10 +576,11 @@ function certificateHtml(lid, eid) {
     const sigs = q.entrySigs.all(lid).filter(s => s.entry_id === eid);
     const done = req.every(u => signers.has(u));
     title = `§ ${h.seq} · ${doc.title || 'Untitled'}`;
-    body = `<p class="state ${done ? 'ok' : 'wait'}">${done ? 'Signed by every required member' : 'Not yet signed by every required member'}</p>
+    const later = done && doc.effectiveOn > now().slice(0, 10);
+    body = `<p class="state ${done ? 'ok' : 'wait'}">${done ? `Signed by every required member${later ? `; takes effect on ${longDay(doc.effectiveOn)}` : ''}` : 'Not yet signed by every required member'}</p>
       <h2>Text as recorded</h2><blockquote>${e(doc.text)}</blockquote>
       <dl><dt>Agreement</dt><dd>${e(l.name)}${l.governing_law ? ` · governing law: ${e(l.governing_law)}` : ''}</dd><dt>Written by</dt><dd>${e(who(ent.author_id).name)} &lt;${e(who(ent.author_id).email)}&gt;</dd>
-      <dt>Recorded</dt><dd>${when(ent.created_at)}</dd><dt>Entry fingerprint</dt><dd><code>${e(h.hash)}</code></dd><dt>Previous fingerprint</dt><dd><code>${e(h.prev_hash)}</code></dd></dl>
+      <dt>Recorded</dt><dd>${when(ent.created_at)}</dd><dt>Effective</dt><dd>${doc.effectiveOn ? `From ${longDay(doc.effectiveOn)}, or when the last required member signs if later` : 'When every required member has signed'}</dd><dt>Entry fingerprint</dt><dd><code>${e(h.hash)}</code></dd><dt>Previous fingerprint</dt><dd><code>${e(h.prev_hash)}</code></dd></dl>
       <h2>Signatures</h2>${req.map(u => { const s = sigs.find(x => x.user_id === u); return s ? `<section>${audit(s)}<ul>${consentRows(u)}</ul></section>` : `<section><p><strong>${e(who(u).name)}</strong> hasn’t signed.</p></section>`; }).join('')}`;
   } else {
     const sigs = q.ledgerSigs.all(lid);
@@ -903,7 +910,7 @@ const server = http.createServer(async (req, res) => {
           q.addEntry.run(e.id, e.ledger_id, e.author_id, e.created_at, e.required, e.doc);
           const hash = chainEntry(e);
           q.agree.run(id, me.id, at);
-          if (signer) q.addEntrySig.run(id, me.id, at, signer, entryStatement(l, entryNumber(lid, id), hash), hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || '');
+          if (signer) q.addEntrySig.run(id, me.id, at, signer, entryStatement(l, entryNumber(lid, id), hash, clean.effectiveOn), hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || '');
         });
         if (signer) mailIfComplete(lid, id);
         notifyLedger(lid, me, id, false);
@@ -930,7 +937,7 @@ const server = http.createServer(async (req, res) => {
         const bad = checkCode(l, me, 'entry:' + parts[4], body.code);
         if (bad) return send(res, 403, bad);
         const at = now();
-        const added = tx(() => { const c = q.agree.run(parts[4], me.id, at).changes; q.addEntrySig.run(parts[4], me.id, at, name, entryStatement(l, h.seq, h.hash), h.hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || ''); return c; });
+        const added = tx(() => { const c = q.agree.run(parts[4], me.id, at).changes; q.addEntrySig.run(parts[4], me.id, at, name, entryStatement(l, h.seq, h.hash, JSON.parse(e.doc).effectiveOn), h.hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || ''); return c; });
         mailIfComplete(lid, parts[4]);
         if (added) notifyLedger(lid, me, parts[4], true);
         return send(res, 200, { ok: true });

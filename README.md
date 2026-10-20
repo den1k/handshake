@@ -30,6 +30,10 @@ in the agreement's **Settings** (author only, and it can't be switched off again
 3. Every new rule is signed the same way, by its author on saving and by each member with
    **Agree and sign**. A signature names the fingerprint of the exact text signed; the
    server refuses it if that text isn't what was recorded.
+4. A rule (or a repeal) can carry an **effective date**. It's part of the recorded text, so the
+   fingerprint and every signature cover it. The rule takes effect on that day (from midnight
+   UTC), or when the last member signs if that's later; until then it shows as signed but not
+   yet in effect, and a rule it replaces stays in force. Past dates are allowed.
 
 Every entry carries a SHA-256 fingerprint chained to the one before it, so changing,
 removing or reordering anything breaks the chain; Settings and every certificate run the

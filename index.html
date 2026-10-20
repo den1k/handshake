@@ -248,6 +248,8 @@ code { font-size: .9em; }
 .lane .ln.wait { background: repeating-linear-gradient(var(--c) 0 8px, transparent 8px 14px); }
 .lane .stn { top: 22px; height: 24px; border-radius: 12px; background: #fff; border: 4px solid #000; }
 .lane .stn.old { border-color: var(--old); }
+.lane .stn.sched { border-style: dashed; }
+.field.eff input { max-width: 14rem; }
 .date { font: 400 .82rem/1.4 var(--f-ui); color: var(--muted); padding-top: 1.25rem !important; padding-inline: .9rem !important; font-variant-numeric: tabular-nums; display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
 .pill-tag { font: 700 .75rem/1.6 var(--f-ui); border-radius: 4px; padding: 0 .5rem; }
 .pill-tag.latest { background: var(--accent); color: var(--on-accent); }
@@ -359,7 +361,7 @@ code { font-size: .9em; }
 .row { display: flex; flex-wrap: wrap; gap: .6rem 1.25rem; align-items: center; }
 .field { display: grid; gap: .4rem; }
 .lbl { font: 600 .95rem/1.2 var(--f-text); letter-spacing: 0; color: var(--ink); }
-textarea, input[type="text"], input[type="email"], select { font: .95rem/1.45 var(--f-ui); color: var(--ink); background: var(--field); border: 1px solid var(--edge); border-radius: 6px; padding: .7rem .85rem; width: 100%; }
+textarea, input[type="text"], input[type="email"], input[type="date"], select { font: .95rem/1.45 var(--f-ui); color: var(--ink); background: var(--field); border: 1px solid var(--edge); border-radius: 6px; padding: .7rem .85rem; width: 100%; }
 textarea { resize: vertical; }
 textarea.prose { font: 1.06rem/1.55 var(--f-text); }
 textarea::placeholder, input::placeholder { color: var(--muted); }
@@ -532,6 +534,8 @@ const str = v => typeof v === 'string' ? v.trim() : (v == null ? '' : String(v).
 const arr = v => Array.isArray(v) ? v : [];
 const fol = n => String(n);
 const fmtDate = iso => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
+// An effective date: a calendar day, counted from the start of that day UTC.
+const fmtDay = d => { const x = new Date(d + 'T00:00:00Z'); return isNaN(x) ? '' : x.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }); };
 const fmtTime = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' }); };
 const marked = t => esc(t).replace(/\[([^\]\n]{1,240})\]/g, '<mark>[$1]</mark>');
 const listJoin = xs => xs.length < 2 ? (xs[0] || '') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
@@ -562,7 +566,7 @@ const T = { busy: false, busyAt: 'top', ctl: null, progress: '', error: '', savi
 
 function blankDraft() {
   return { mode: 'rule', text: '', firstText: '', title: '', titleTouched: false, checked: false, checkedText: '',
-    related: [], resolve: {}, edges: [], include: {}, supersedes: [], amending: null, reason: '', entryId: null };
+    related: [], resolve: {}, edges: [], include: {}, supersedes: [], amending: null, reason: '', effectiveOn: '', entryId: null };
 }
 function loadDraft() {
   try { const v = JSON.parse(localStorage.getItem(draftKey()) || 'null'); if (v && typeof v === 'object') return Object.assign(blankDraft(), v); } catch (e) {}
@@ -588,14 +592,20 @@ function derive() {
     r.requiredAll = r.requiredAll || r.required;
     r.required = r.requiredAll.filter(u => r.agreed.has(u) || S.members.some(m => m.id === u));
   }
+  // In effect once everyone has agreed, and, if the rule has an effective date, once that day has come.
+  const today = new Date().toISOString().slice(0, 10);
   for (const r of list) {
-    r.effective = r.required.length > 0 && r.required.every(u => r.agreed.has(u));
-    r.effectiveAt = r.effective ? r.required.map(u => r.agreed.get(u)).sort().pop() : '';
+    r.effectiveOn = /^\d{4}-\d{2}-\d{2}$/.test(str(r.effectiveOn)) ? r.effectiveOn : '';
+    const all = r.required.length > 0 && r.required.every(u => r.agreed.has(u));
+    r.scheduled = all && r.effectiveOn > today;
+    r.effective = all && !r.scheduled;
+    const last = all ? r.required.map(u => r.agreed.get(u)).sort().pop() : '';
+    r.effectiveAt = r.effective ? [last, r.effectiveOn && r.effectiveOn + 'T00:00:00.000Z'].sort().pop() : '';
   }
   // A rule only replaces or repeals another once it is itself in effect.
   for (const r of list) for (const s of arr(r.supersedes)) { const t = byId.get(s); if (t && t !== r) (r.effective ? t.by : t.pendingBy).push(r); }
   for (const r of list) {
-    r.status = !r.effective ? 'pending' : r.kind === 'repeal' ? 'repeal'
+    r.status = r.scheduled ? 'scheduled' : !r.effective ? 'pending' : r.kind === 'repeal' ? 'repeal'
       : r.by.length ? (r.by.some(x => x.kind === 'repeal') ? 'repealed' : 'superseded') : 'force';
   }
   // Lines in the order people joined; someone who has left takes the place of the first entry that needed them.
@@ -765,7 +775,8 @@ function renderLedger() {
   restoreSigFields('es', keepSig);
   nextEl.innerHTML = (S.ledger && !drafting() && S.filter === 'all' && !q) ? nextHTML() : '';
   const waiting = list.filter(r => r.status === 'pending').length;
-  const tally = `${list.length} ${list.length === 1 ? 'entry' : 'entries'} · ${list.filter(r => r.status === 'force').length} in force${waiting ? ` · ${waiting} awaiting agreement` : ''}`;
+  const scheduled = list.filter(r => r.status === 'scheduled').length;
+  const tally = `${list.length} ${list.length === 1 ? 'entry' : 'entries'} · ${list.filter(r => r.status === 'force').length} in force${scheduled ? ` · ${scheduled} not yet in effect` : ''}${waiting ? ` · ${waiting} awaiting agreement` : ''}`;
   foot.innerHTML = `<p class="sc">${RINGS()}${tally}${RINGS()}</p>`;
 }
 
@@ -822,17 +833,18 @@ function laneHTML(r, prev, next) {
     const last = stops[stops.length - 1];
     if (last && last.to === i - 1) last.to = i; else stops.push({ from: i, to: i });
   }
-  const old = r.status === 'superseded' || r.status === 'repealed';
-  const stations = stops.map(s => `<i class="stn${old ? ' old' : ''}" style="left:${x(s.from) - 7}px;width:${15 * (s.to - s.from) + 26}px"></i>`).join('');
+  const old = r.status === 'superseded' || r.status === 'repealed', sched = r.status === 'scheduled';
+  const stations = stops.map(s => `<i class="stn${old ? ' old' : sched ? ' sched' : ''}" style="left:${x(s.from) - 7}px;width:${15 * (s.to - s.from) + 26}px"></i>`).join('');
   return `<div class="lane" aria-hidden="true">${lines}${stations}</div>`;
 }
 
 function rowHTML(r, rel, isLatest, prev, next) {
   const past = r.status === 'superseded' || r.status === 'repealed';
   const waiting = r.required.filter(u => !r.agreed.has(u));
-  const seal = { force: 'In force', superseded: 'Replaced', repealed: 'Repealed', repeal: 'Repeal in effect', pending: binding() ? 'Awaiting signatures' : 'Awaiting agreement' }[r.status];
+  const seal = { force: 'In force', superseded: 'Replaced', repealed: 'Repealed', repeal: 'Repeal in effect', pending: binding() ? 'Awaiting signatures' : 'Awaiting agreement',
+    scheduled: `Takes effect ${fmtDay(r.effectiveOn)}` }[r.status];
   const links = [];
-  for (const id of arr(r.supersedes)) { const t = L.byId.get(id); if (t) links.push(refBtn(t, r.kind === 'repeal' ? (r.effective ? 'Repeals' : 'Would repeal') : (r.effective ? 'Replaces' : 'Would replace'))); }
+  for (const id of arr(r.supersedes)) { const t = L.byId.get(id); if (t) links.push(refBtn(t, r.kind === 'repeal' ? (r.effective ? 'Repeals' : r.scheduled ? 'Will repeal' : 'Would repeal') : (r.effective ? 'Replaces' : r.scheduled ? 'Will replace' : 'Would replace'))); }
   for (const b of r.by) links.push(refBtn(b, b.kind === 'repeal' ? 'Repealed by' : 'Replaced by'));
   for (const id of arr(r.relates)) { const t = L.byId.get(id); if (t) links.push(refBtn(t, 'See also')); }
   const actions = [];
@@ -847,11 +859,12 @@ function rowHTML(r, rel, isLatest, prev, next) {
     }
   }
   const pendingNote = r.pendingBy.length && r.status === 'force'
-    ? `<p class="pending-note">${r.pendingBy.map(b => `Will be ${b.kind === 'repeal' ? 'repealed' : 'replaced'} by ${refBtn(b, '').replace('> §', '>§')} once everyone agrees`).join('; ')}.</p>` : '';
+    ? `<p class="pending-note">${r.pendingBy.map(b => `Will be ${b.kind === 'repeal' ? 'repealed' : 'replaced'} by ${refBtn(b, '').replace('> §', '>§')} ${b.scheduled ? `on ${fmtDay(b.effectiveOn)}` : 'once everyone agrees'}`).join('; ')}.</p>` : '';
   const status = rel
     ? `<span class="rel r-${esc(rel.kind)}">${esc(rel.label || REL[rel.kind] || 'Related')}</span>${rel.note ? `<span class="rel-note">${esc(rel.note)}</span>` : ''}${rel.decision ? `<span class="rel-note"><strong>${esc(rel.decision)}</strong></span>` : ''}`
     : `<span class="seal s-${r.status}">${RINGS(r.status === 'pending' ? 'dashed' : r.status === 'force' || r.status === 'repeal' ? 'filled' : '')}${seal}</span>`
       + (r.status === 'pending' ? `<span class="rel-note">Waiting for ${esc(listJoin(waiting.map(firstName)))}</span>`
+        : r.status === 'scheduled' ? `<span class="rel-note">Everyone has signed</span>`
         : r.effectiveAt && r.status !== 'superseded' && r.status !== 'repealed' ? `<span class="rel-note">Since ${esc(fmtWhen(r.effectiveAt))}</span>` : '');
   const cls = ['entry', past && 'past', r.status === 'force' && 'force', r.status === 'pending' && 'pending', r.kind === 'repeal' && 'is-repeal', isLatest && 'latest', rel && rel.kind === 'contradicts' && 'rel-clash', rel && rel.kind === 'focus' && 'focused'].filter(Boolean).join(' ');
   return `<article class="${cls}" id="e-${esc(r.id)}">
@@ -862,11 +875,11 @@ function rowHTML(r, rel, isLatest, prev, next) {
       <p class="e-text">${richText(r.text, rel)}</p>
       ${pendingNote}
       ${links.length ? `<div class="e-links">${links.join('')}</div>` : ''}
-      <div class="e-meta"><span>Written by ${esc(nameOf(r.authorId))}</span></div>
+      <div class="e-meta"><span>Written by ${esc(nameOf(r.authorId))}</span>${r.effectiveOn ? `<span>Effective from ${esc(fmtDay(r.effectiveOn))}</span>` : ''}</div>
       ${agreementsHTML(r)}
       ${rel && rel.kind !== 'focus' ? '' : whyHTML(r)}
       ${actions.length ? `<div class="e-actions">${actions.join('')}</div>` : ''}
-      ${S.signing === r.id && mine ? `<div class="row-sign">${signFields('es', `I intend to be legally bound by § ${fol(r.n)} of “${S.ledger.name}” exactly as written (fingerprint ${shortHash(r.hash)})${S.ledger.governingLaw ? `, under ${S.ledger.governingLaw}` : ''}. I am signing electronically.`, 'entry:' + r.id)}
+      ${S.signing === r.id && mine ? `<div class="row-sign">${signFields('es', `I intend to be legally bound by § ${fol(r.n)} of “${S.ledger.name}” exactly as written (fingerprint ${shortHash(r.hash)})${r.effectiveOn ? `, effective from ${fmtDay(r.effectiveOn)}` : ''}${S.ledger.governingLaw ? `, under ${S.ledger.governingLaw}` : ''}. I am signing electronically.`, 'entry:' + r.id)}
         <div class="row"><button type="button" class="btn primary" data-act="sign-entry" data-id="${esc(r.id)}">${RINGS()}Sign § ${fol(r.n)}</button><button type="button" class="btn link" data-act="cancel-sign">Cancel</button></div></div>` : ''}
     </div>
     <div class="e-status">${status}</div>
@@ -963,6 +976,7 @@ function ruleHTML() {
     <label class="field"><span class="lbl">Wording</span>
       <textarea id="d-text" class="prose" rows="5" placeholder="e.g. Whoever cooks dinner doesn’t do the dishes.">${esc(D.text)}</textarea></label>
     <label class="field"><span class="lbl">Title</span><input type="text" id="d-title" value="${esc(D.title)}" placeholder="${D.checked ? 'A short name' : 'Optional. The check suggests one.'}" maxlength="80"></label>
+    ${binding() ? effectiveField('rule') : ''}
     ${S.ai ? `<div class="row">${T.busy ? thinkingHTML() : `<button type="button" id="check1" class="btn${D.checked && !stale ? '' : ' primary'}" data-act="check"${str(D.text) ? '' : ' disabled'}>${RINGS()}${D.checked ? 'Check again' : 'Check rule'}</button><span class="hint">Finds related rules and conflicts, and suggests edge cases.</span>`}</div>`
       : `<p class="hint">Rule checks need the local server started with a GROQ_API_KEY. You can still write and save rules.</p>`}
     ${T.error ? `<p class="err" role="alert">${esc(T.error)}</p>` : ''}
@@ -1014,8 +1028,12 @@ function repealHTML() {
     <p class="quoted">${marked(str(t.text))}</p>
     <p class="hint">A repeal is its own entry. § ${fol(t.n)} stays in the agreement, marked as repealed, and stops being in force.</p>
     <label class="field"><span class="lbl">Why, in a sentence (optional)</span><textarea id="d-reason" rows="3" placeholder="e.g. We hired a cleaner, so the rota no longer applies.">${esc(D.reason)}</textarea></label>
+    ${binding() ? effectiveField('repeal') : ''}
   </section>`;
 }
+// Legally binding agreements only: the date a rule (or repeal) takes effect, signed along with its text.
+const effectiveField = what => `<label class="field eff"><span class="lbl">Effective date (optional)</span><input type="date" id="d-effective" value="${esc(D.effectiveOn)}"></label>
+    <p class="hint">Leave it empty and the ${what} takes effect once everyone has signed. With a date, it takes effect on that day, or when the last person signs if that’s later. The date is part of what everyone signs.</p>`;
 
 function renderFoot() {
   const f = $('#draft-foot');
@@ -1032,7 +1050,7 @@ function renderFoot() {
   }
   if (binding() && !mySignedLedger()) block.push('This agreement is legally binding. Sign the agreement before writing rules in it.');
   const disabled = block.length || T.saving || T.busy;
-  const sign = binding() && mySignedLedger() ? signFields('ds', `I intend to be legally bound by this ${D.mode === 'repeal' ? 'repeal' : 'rule'} (§ ${fol(L.list.length + 1)} of “${S.ledger.name}”) exactly as written${S.ledger.governingLaw ? `, under ${S.ledger.governingLaw}` : ''}. I am signing electronically.`, 'new') : '';
+  const sign = binding() && mySignedLedger() ? signFields('ds', `I intend to be legally bound by this ${D.mode === 'repeal' ? 'repeal' : 'rule'} (§ ${fol(L.list.length + 1)} of “${S.ledger.name}”) exactly as written${D.effectiveOn ? `, effective from ${fmtDay(D.effectiveOn)}` : ''}${S.ledger.governingLaw ? `, under ${S.ledger.governingLaw}` : ''}. I am signing electronically.`, 'new') : '';
   const keep = keepSigFields('ds');
   f.innerHTML = `${sign}${block.length || note.length ? `<ul class="foot-notes">${block.map(b => `<li class="b">${esc(b)}</li>`).join('')}${note.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
     <div class="foot-row">
@@ -1158,6 +1176,7 @@ async function record() {
     const t = L.byId.get(D.supersedes[0]);
     if (!t) return;
     doc = { kind: 'repeal', title: `Repeal of § ${fol(t.n)}, ${str(t.title)}`.slice(0, 120), text: str(D.reason) || 'Repealed by agreement.', supersedes: [t.id] };
+    if (binding() && D.effectiveOn) doc.effectiveOn = D.effectiveOn;
   } else {
     const text = str(D.text);
     if (!text) return;
@@ -1167,6 +1186,7 @@ async function record() {
       relations: D.related.map(r => ({ ruleId: r.ruleId, kind: r.kind, explanation: r.explanation, quoteOld: r.quoteOld, quoteNew: r.quoteNew, resolution: D.resolve[r.ruleId] || '' })),
       edgeCases: D.edges.filter((_, i) => D.include[i]).map(e => e.clause),
       supersedes: sup, relates: D.related.map(r => r.ruleId).filter(id => !sup.includes(id)) };
+    if (binding() && D.effectiveOn) doc.effectiveOn = D.effectiveOn;
   }
   const sig = binding() ? readSignature('ds') : {};
   if (!sig) return;
@@ -1176,12 +1196,13 @@ async function record() {
     if (!D.entryId) { D.entryId = newId(); saveDraft(); }
     const id = D.entryId;
     await api('POST', `/api/ledgers/${S.ledger.id}/entries`, Object.assign({ id, doc }, sig));
+    const from = doc.effectiveOn && doc.effectiveOn > new Date().toISOString().slice(0, 10) ? ` It takes effect on ${fmtDay(doc.effectiveOn)}${S.members.length > 1 ? ', once everyone has signed' : ''}.` : '';
     D = blankDraft(); saveDraft();
     S.pendingJump = id;
     S.filter = 'all'; S.q = ''; S.focus = null; $('#q').value = ''; syncFilter();
     closeComposer();
     await refresh();
-    toast(S.members.length > 1 ? `${binding() ? 'Signed and saved' : 'Saved'}. It comes into effect when everyone has ${binding() ? 'signed' : 'agreed'}.` : `${binding() ? 'Signed and saved' : 'Saved'}, and in effect.`);
+    toast(from ? `Signed and saved.${from}` : S.members.length > 1 ? `${binding() ? 'Signed and saved' : 'Saved'}. It comes into effect when everyone has ${binding() ? 'signed' : 'agreed'}.` : `${binding() ? 'Signed and saved' : 'Saved'}, and in effect.`);
   } catch (e) {
     toast(e.message || 'Couldn’t save just now. Your draft is kept; try again.');
   } finally {
@@ -1208,7 +1229,7 @@ async function signEntry(id) {
     S.signing = null;
     await refresh();
     const now = L.byId.get(id);
-    toast(now && now.effective ? `Signed. § ${fol(now.n)} is now in effect.` : 'Signed.');
+    toast(now && now.effective ? `Signed. § ${fol(now.n)} is now in effect.` : now && now.scheduled ? `Signed by everyone. § ${fol(now.n)} takes effect on ${fmtDay(now.effectiveOn)}.` : 'Signed.');
   } catch (e) { toast(e.message || 'Couldn’t sign just now. Try again.'); if (e.code === 'stale') refresh().catch(() => {}); }
 }
 
@@ -1291,6 +1312,7 @@ document.addEventListener('input', e => {
   if (t.id === 'd-text') { D.text = t.value; const b = $('#check1'); if (b) b.disabled = !str(t.value); }
   else if (t.id === 'd-title') { D.title = t.value; D.titleTouched = true; }
   else if (t.id === 'd-reason') D.reason = t.value;
+  else if (t.id === 'd-effective') D.effectiveOn = t.value;
   else return;
   saveSoon(); renderFoot();
 });
