@@ -172,6 +172,10 @@ code { font-size: .9em; }
 .row-sign { display: grid; gap: .7rem; }
 .sign-rules { margin: 0; padding-left: 1.2rem; display: grid; gap: .7rem; max-height: 22rem; overflow: auto; }
 .sign-rules p { margin: .2rem 0 0; font: .98rem/1.55 var(--f-text); white-space: pre-wrap; }
+.sign-rules li, .sign-waiting li { display: grid; gap: .3rem; }
+.sign-waiting { list-style: none; margin: 0; padding: 0; display: grid; gap: .9rem; }
+.also-text { display: block; margin-top: .2rem; font: .98rem/1.55 var(--f-text); white-space: pre-wrap; }
+.sign-rules .e-actions, .sign-waiting .e-actions { font-size: .85rem; }
 .agreements .signed-as { font-style: italic; color: var(--ink-2); }
 .agreements .cert { gap: .8rem; padding-top: .3rem; border-top: 1px dashed var(--grid); }
 .new-ledger { display: grid; gap: .7rem; justify-items: start; text-align: left; max-width: 34rem; }
@@ -558,7 +562,7 @@ function richText(t, info) {
 }
 
 /* ---------- state ---------- */
-const S = { user: null, me: null, ledgers: [], ledger: null, members: [], former: [], signIn: true, view: 'ledger', consent: null, ledgerSigs: [], sigs: [], signing: null,
+const S = { user: null, me: null, ledgers: [], ledger: null, members: [], former: [], accepts: [], signIn: true, view: 'ledger', consent: null, ledgerSigs: [], sigs: [], signing: null,
   status: 'connecting', loaded: false, rules: [], agr: [], filter: 'all', q: '', newest: false,
   open: new Set(), profiles: {}, pendingJump: null, showAll: false, scrolled: false, focus: null, ai: null };
 let L = { list: [], byId: new Map(), lanes: [] };
@@ -592,6 +596,16 @@ function derive() {
     r.requiredAll = r.requiredAll || r.required;
     r.required = r.requiredAll.filter(u => r.agreed.has(u) || S.members.some(m => m.id === u));
   }
+  // Joining means agreeing to the agreement as a whole. A rule everyone had already agreed to when someone joined is
+  // covered by that (r.covered); a rule still waiting when they joined needs them too.
+  for (const r of list) {
+    const doneAt = r.required.length && r.required.every(u => r.agreed.has(u)) ? r.required.map(u => r.agreed.get(u)).sort().pop() : '';
+    r.covered = [];
+    for (const m of S.members) {
+      if (r.required.includes(m.id) || str(m.joinedAt) <= str(r.createdAt)) continue;
+      if (doneAt && doneAt <= str(m.joinedAt)) r.covered.push(m.id); else r.required.push(m.id);
+    }
+  }
   // In effect once everyone has agreed, and, if the rule has an effective date, once that day has come.
   const today = new Date().toISOString().slice(0, 10);
   for (const r of list) {
@@ -605,8 +619,14 @@ function derive() {
   // A rule only replaces or repeals another once it is itself in effect.
   for (const r of list) for (const s of arr(r.supersedes)) { const t = byId.get(s); if (t && t !== r) (r.effective ? t.by : t.pendingBy).push(r); }
   for (const r of list) {
-    r.status = r.scheduled ? 'scheduled' : !r.effective ? 'pending' : r.kind === 'repeal' ? 'repeal'
-      : r.by.length ? (r.by.some(x => x.kind === 'repeal') ? 'repealed' : 'superseded') : 'force';
+    // A rule replaced or repealed by one now in effect is closed, even if it never came into force itself.
+    r.status = r.by.length && r.kind !== 'repeal' ? (r.by.some(x => x.kind === 'repeal') ? 'repealed' : 'superseded')
+      : r.scheduled ? 'scheduled' : !r.effective ? 'pending' : r.kind === 'repeal' ? 'repeal' : 'force';
+  }
+  // A replaced rule was part of what someone agreed to only if they agreed to the whole agreement before it was replaced.
+  for (const r of list) if (r.by.length) {
+    const gone = r.by.map(b => str(b.effectiveAt)).filter(Boolean).sort()[0] || '';
+    r.covered = r.covered.filter(id => { const at = acceptedAt(id); return at && (!gone || at <= gone); });
   }
   // Lines in the order people joined; someone who has left takes the place of the first entry that needed them.
   const firstNeed = id => { const r = list.find(x => x.requiredAll.includes(id)); return r ? str(r.createdAt) : '~'; };
@@ -615,6 +635,24 @@ function derive() {
   L = { list, byId, lanes };
 }
 const inForce = () => L.list.filter(r => r.status === 'force' && r.kind !== 'repeal');
+// When a member agreed to the agreement as a whole: by signing it (legally binding) or by agreeing to it on joining.
+function acceptedAt(id) {
+  const m = S.members.find(x => x.id === id);
+  const xs = (binding() ? S.ledgerSigs : S.accepts).filter(a => a.userId === id && (!m || str(a.at) >= str(m.joinedAt)));
+  return xs.length ? xs[xs.length - 1].at : '';
+}
+// The rules someone agrees to by agreeing to the whole agreement: those already agreed when they joined, still standing.
+const toAccept = id => L.list.filter(r => r.covered.includes(id) && (r.status === 'force' || r.status === 'scheduled'));
+// Someone who joined after rules were agreed and hasn't yet agreed to the whole agreement.
+const needsAccept = id => !acceptedAt(id) && toAccept(id).length > 0;
+// Rules still waiting for my agreement (or signature), offered alongside agreeing to the whole agreement.
+const waitingForMe = () => L.list.filter(r => r.status === 'pending' && r.required.includes(S.me) && !r.agreed.has(S.me));
+const changeLinks = r => `<span class="e-actions"><button type="button" class="btn link" data-act="amend" data-id="${esc(r.id)}">Suggest a change</button>${r.status === 'force' ? `<button type="button" class="btn link" data-act="repeal" data-id="${esc(r.id)}">Repeal</button>` : ''}</span>`;
+const reviewList = rules => `<ol class="sign-rules">${rules.map(r => `<li><strong>§ ${fol(r.n)} · ${esc(str(r.title))}</strong>${r.effectiveOn ? ` <span class="dim">effective from ${esc(fmtDay(r.effectiveOn))}</span>` : ''}<p>${marked(str(r.text))}</p>${changeLinks(r)}</li>`).join('')}</ol>`;
+const waitingList = (rules, verb) => rules.length ? `<h3>Waiting for ${verb === 'sign' ? 'your signature' : 'your agreement'}</h3>
+  <p class="hint">Ticked rules are ${verb === 'sign' ? 'signed' : 'agreed'} along with the agreement, each on its own. Untick any you want to change or settle later.</p>
+  <ul class="sign-waiting">${rules.map(r => `<li><label class="check"><input type="checkbox" data-also="${esc(r.id)}" checked><span><strong>§ ${fol(r.n)} · ${esc(str(r.title))}</strong>${r.effectiveOn ? ` <span class="dim">effective from ${esc(fmtDay(r.effectiveOn))}</span>` : ''}<span class="also-text">${marked(str(r.text))}</span></span></label>${changeLinks(r)}</li>`).join('')}</ul>` : '';
+const alsoTicked = () => [...document.querySelectorAll('[data-also]')].filter(x => x.checked).map(x => L.byId.get(x.dataset.also)).filter(Boolean);
 
 /* ---------- legally binding ledgers ---------- */
 const binding = () => !!(S.ledger && S.ledger.binding);
@@ -626,18 +664,18 @@ function legalName() { try { return localStorage.getItem('handshake.legalName.' 
 function rememberName(n) { try { localStorage.setItem('handshake.legalName.' + S.me, n); } catch (e) {} }
 // The signature fields used everywhere a binding signature is made.
 const signFields = (prefix, statement, purpose) => `<div class="sigbox">
+    <p class="hint">By signing, you make this statement:</p>
     <p class="sig-statement">${esc(statement)}</p>
     <label class="field"><span class="lbl">Your full legal name</span><input type="text" id="${prefix}-name" maxlength="120" autocomplete="name" value="${esc(legalName())}"></label>
-    <label class="check"><input type="checkbox" id="${prefix}-intent"><span>I intend to be legally bound by this.</span></label>
     ${S.ledger && S.ledger.verifyEmail ? `<div class="field"><span class="lbl">Code from your email</span>
       <div class="row code-row"><input type="text" id="${prefix}-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 digits" aria-label="Code from your email"><button type="button" class="btn small" data-act="send-code" data-purpose="${esc(purpose)}" data-prefix="${esc(prefix)}">Email me a code</button></div>
       <p class="hint" id="${prefix}-code-hint">This agreement confirms every signature with a code sent to ${esc(S.myEmail || 'your Google address')}.</p></div>` : ''}
   </div>`;
 // Keep what someone typed in a signature box across a re-render.
-const keepSigFields = prefix => { const n = $('#' + prefix + '-name'); return n ? { name: n.value, intent: $('#' + prefix + '-intent').checked, code: ($('#' + prefix + '-code') || {}).value || '' } : null; };
+const keepSigFields = prefix => { const n = $('#' + prefix + '-name'); return n ? { name: n.value, code: ($('#' + prefix + '-code') || {}).value || '' } : null; };
 function restoreSigFields(prefix, k) {
   if (!k || !$('#' + prefix + '-name')) return;
-  $('#' + prefix + '-name').value = k.name; $('#' + prefix + '-intent').checked = k.intent;
+  $('#' + prefix + '-name').value = k.name;
   if ($('#' + prefix + '-code')) $('#' + prefix + '-code').value = k.code;
 }
 async function sendCode(purpose, prefix) {
@@ -649,10 +687,10 @@ async function sendCode(purpose, prefix) {
   } catch (e) { toast(e.message || 'Couldn’t send a code. Try again.'); }
 }
 function readSignature(prefix) {
-  const n = $('#' + prefix + '-name'), i = $('#' + prefix + '-intent');
+  // Pressing Sign, beside the statement, is the signer's intent; the one-time e-signature consent covers the rest.
+  const n = $('#' + prefix + '-name');
   const typedName = str(n && n.value);
   if (typedName.length < 2) { if (n) n.focus(); toast('Type your full legal name to sign.'); return null; }
-  if (!i || !i.checked) { if (i) i.focus(); toast('Tick the box to confirm you intend to be legally bound.'); return null; }
   const c = $('#' + prefix + '-code');
   if (c && !/^\d{6}$/.test(str(c.value))) { c.focus(); toast('Enter the six-digit code from your email. Use “Email me a code” to get one.'); return null; }
   rememberName(typedName);
@@ -805,16 +843,20 @@ function agreementsHTML(r) {
     const sig = sigOf(r.id, u);
     return `<li class="${at ? 'yes' : 'no'}"><i class="who-line" style="--c:${lineColor(u)}"></i><span class="who">${esc(firstName(u))}</span><span class="when">${at ? `<time datetime="${esc(at)}">${esc(fmtWhen(at))}</time>` : (binding() ? 'Not yet signed' : 'Not yet agreed')}</span>${sig ? `<span class="signed-as">Signed as “${esc(sig.typedName)}”</span>` : at && binding() ? '<span class="signed-as dim">Agreed before the agreement was binding</span>' : ''}</li>`;
   }).join('');
+  const joined = r.covered.map(u => { const at = acceptedAt(u); return `<li class="${at ? 'yes' : 'no'}"><i class="who-line" style="--c:${lineColor(u)}"></i><span class="who">${esc(firstName(u))}</span><span class="when">${at
+    ? `${binding() ? 'Signed the agreement' : 'Agreed to the whole agreement'}, <time datetime="${esc(at)}">${esc(fmtWhen(at))}</time>` : binding() ? 'Hasn’t signed the agreement yet' : 'Hasn’t agreed to the agreement yet'}</span></li>`; }).join('');
   const cert = binding() && r.hash ? `<li class="cert"><a href="/certificate/${esc(S.ledger.id)}/${esc(r.id)}" target="_blank" rel="noopener">Certificate</a><span class="dim">Fingerprint ${esc(shortHash(r.hash))}</span></li>` : '';
-  return `<ul class="agreements" aria-label="${binding() ? 'Signatures' : 'Agreements'}">${people}${cert}</ul>`;
+  return `<ul class="agreements" aria-label="${binding() ? 'Signatures' : 'Agreements'}">${people}${joined}${cert}</ul>`;
 }
 
 /* Members' lines, in the colours of the subway map, in the order they joined. */
 const LINE_COLORS = ['#0080c7', '#f38400', '#009a63', '#dc1440', '#af3788', '#fdd200', '#74b02e', '#979799', '#996633'];
 const lineColor = id => { const i = S.members.findIndex(m => m.id === id); return i < 0 ? 'var(--old)' : LINE_COLORS[i % LINE_COLORS.length]; };
-// A member's line runs through a row if they were a member when it was written (or it needs them). Someone who
-// has left keeps a grey line through the rows they agreed to, after everyone still here.
-const onLine = (m, r) => !!r && (S.former.includes(m) ? r.agreed.has(m.id) : str(m.joinedAt) <= str(r.createdAt) || r.required.includes(m.id));
+// Every member's line runs the length of the agreement, since joining means agreeing to it as a whole; their stops
+// and dashes say where they stand on each rule. Someone who has left keeps a grey line through the rows they agreed to.
+const onLine = (m, r) => !!r && (S.former.includes(m) ? r.agreed.has(m.id) : true);
+// A member's stop on a rule: they agreed to it, or it was covered when they agreed to the whole agreement.
+const stopsAt = (m, r) => r.agreed.has(m.id) || (r.covered.includes(m.id) && !!acceptedAt(m.id));
 
 /* The lane beside a rule: each member's line, and the rule as a station. Everyone agreed: one pill across
    the lines (a transfer station). Otherwise members side by side who agreed share a pill, anyone alone gets
@@ -823,13 +865,13 @@ function laneHTML(r, prev, next) {
   const x = i => 16 + 15 * i;
   const on = L.lanes.map((m, i) => ({ m, i })).filter(({ m }) => onLine(m, r));
   const lines = on.map(({ m, i }) => {
-    const wait = r.status === 'pending' && r.required.includes(m.id) && !r.agreed.has(m.id);
+    const wait = (r.status === 'pending' && r.required.includes(m.id) && !r.agreed.has(m.id)) || (r.covered.includes(m.id) && !acceptedAt(m.id));
     const cls = ['ln', !onLine(m, prev) && 'top', !onLine(m, next) && 'bot', wait && 'wait'].filter(Boolean).join(' ');
     return `<i class="${cls}" style="--c:${lineColor(m.id)};left:${x(i)}px"></i>`;
   }).join('');
   const stops = [];
   for (const { m, i } of on) {
-    if (!r.agreed.has(m.id)) continue;
+    if (!stopsAt(m, r)) continue;
     const last = stops[stops.length - 1];
     if (last && last.to === i - 1) last.to = i; else stops.push({ from: i, to: i });
   }
@@ -856,6 +898,8 @@ function rowHTML(r, rel, isLatest, prev, next) {
     if (r.status === 'force') {
       actions.push(`<button type="button" class="btn link" data-act="amend" data-id="${esc(r.id)}">Amend</button>`);
       actions.push(`<button type="button" class="btn link" data-act="repeal" data-id="${esc(r.id)}">Repeal</button>`);
+    } else if (r.status === 'pending' && r.kind !== 'repeal') {
+      actions.push(`<button type="button" class="btn link" data-act="amend" data-id="${esc(r.id)}">Suggest a change</button>`);
     }
   }
   const pendingNote = r.pendingBy.length && r.status === 'force'
@@ -970,7 +1014,9 @@ function ruleHTML() {
   const amend = D.amending && L.byId.get(D.amending);
   const stale = D.checked && str(D.text) !== D.checkedText;
   let h = '';
-  if (amend) h += `<p class="banner">Amending § ${fol(amend.n)}, “${esc(str(amend.title))}”. When you save, § ${fol(amend.n)} is marked as replaced. It stays in the agreement.</p>`;
+  if (amend) h += amend.status === 'pending'
+    ? `<p class="banner">Suggesting a change to § ${fol(amend.n)}, “${esc(str(amend.title))}”. If everyone agrees to your version, it replaces § ${fol(amend.n)}, which stays in the agreement.</p>`
+    : `<p class="banner">Amending § ${fol(amend.n)}, “${esc(str(amend.title))}”. When you save, § ${fol(amend.n)} is marked as replaced. It stays in the agreement.</p>`;
 
   h += `<section class="step"><h3><span class="stepno">1</span>Write the rule</h3>
     <label class="field"><span class="lbl">Wording</span>
@@ -1266,10 +1312,11 @@ document.addEventListener('click', e => {
     case 'agree': agree(id); break;
     case 'amend': {
       const r = L.byId.get(id); if (!r) break;
+      if (S.view !== 'ledger') setView('ledger');
       openComposer({ text: str(r.text), title: str(r.title), titleTouched: true, supersedes: [r.id], amending: r.id });
       break;
     }
-    case 'repeal': openComposer({ mode: 'repeal', supersedes: [id] }); break;
+    case 'repeal': if (S.view !== 'ledger') setView('ledger'); openComposer({ mode: 'repeal', supersedes: [id] }); break;
     case 'new-ledger': showPanel('new-ledger'); break;
     case 'open-ledger': openLedger(b.dataset.id); break;
     case 'create-ledger': createLedger(); break;
@@ -1278,6 +1325,7 @@ document.addEventListener('click', e => {
     case 'save-settings': saveSettings(); break;
     case 'sign-ledger-view': if (drafting()) closeComposer(); setView('sign'); break;
     case 'sign-ledger': signLedger(); break;
+    case 'accept-agreement': acceptAgreement(); break;
     case 'open-sign': S.signing = id; renderLedger(); { const n = $('#es-name'); if (n) n.focus(); } break;
     case 'cancel-sign': S.signing = null; renderLedger(); break;
     case 'sign-entry': signEntry(id); break;
@@ -1373,7 +1421,7 @@ function showGate(kind) {
     const v = S.invite;
     g.innerHTML = v.status === 'open'
       ? `<h2 class="soft">Join “${esc(v.ledgerName)}”?</h2>
-        <p>${esc(v.invitedBy)} invited you. Members see every rule in this agreement, and new rules need everyone’s agreement, yours included.</p>
+        <p>${esc(v.invitedBy)} invited you. When you join, you read the rules already agreed and agree to the whole agreement, or propose changes first. New rules need everyone’s agreement, yours included.</p>
         <div class="row"><button type="button" class="btn primary" data-act="accept-invite">${RINGS()}Join agreement</button><button type="button" class="btn link" data-act="decline-invite">Not now</button></div>`
       : `<h2 class="soft">${v.status === 'used' ? 'Invite already used' : v.status === 'expired' ? 'Invite expired' : 'Invite not found'}</h2>
         <p>${v.status === 'used' ? 'Each invite link works once.' : v.status === 'expired' ? 'Invite links last 7 days.' : 'This invite link isn’t valid.'} Ask ${v.invitedBy ? esc(v.invitedBy) : 'whoever sent it'} for a new one.</p>
@@ -1404,7 +1452,7 @@ function showPanel(kind, data) {
       <div class="row"><input type="text" id="invite-url" readonly value="${esc(data.url)}" aria-label="Invite link"><button type="button" class="btn" data-act="copy-invite">Copy link</button></div>
       <p class="hint">Or email an invite. They get a link of their own, so this one stays free for someone else.</p>
       <div class="row"><input type="email" id="invite-email" placeholder="Their email address" autocomplete="off" aria-label="Email address to invite"><button type="button" class="btn" data-act="email-invite">Send invite</button></div>
-      <p class="hint">Rules written after they join need their agreement too. Rules already written don’t.</p>`;
+      <p class="hint">When they join, they read the rules already agreed and agree to the whole agreement. Rules still waiting for agreement need theirs too.</p>`;
     const i = $('#invite-url'); if (i) i.select();
   }
 }
@@ -1412,7 +1460,19 @@ function showPanel(kind, data) {
 /* The binding bar under the toolbar, and the settings / sign-the-ledger views that replace the ledger. */
 function renderBindbar() {
   const b = $('#bindbar');
-  if (!binding() || S.view !== 'ledger') { b.hidden = true; return; }
+  if (S.view !== 'ledger' || !S.ledger) { b.hidden = true; return; }
+  if (!binding()) {
+    derive();
+    const others = S.members.filter(m => m.id !== S.me && needsAccept(m.id));
+    if (!needsAccept(S.me) && !others.length) { b.hidden = true; return; }
+    b.hidden = false;
+    b.className = 'bindbar' + (needsAccept(S.me) ? ' todo' : '');
+    const n = toAccept(S.me).length;
+    b.innerHTML = needsAccept(S.me)
+      ? `${RINGS('dashed')}<p><strong>You joined ${esc(S.ledger.name)}.</strong> Read the ${n} rule${n === 1 ? '' : 's'} already agreed and agree to the whole agreement, or propose changes first.</p><button type="button" class="btn primary small" data-act="sign-ledger-view">Review and agree</button>`
+      : `${RINGS('dashed')}<p class="dim">Waiting for ${esc(listJoin(others.map(m => firstName(m.id))))} to agree to the whole agreement.</p>`;
+    return;
+  }
   b.hidden = false;
   const unsigned = S.members.filter(m => !S.ledgerSigs.some(s => s.userId === m.id));
   b.className = 'bindbar' + (mySignedLedger() ? '' : ' todo');
@@ -1460,17 +1520,28 @@ function renderView() {
     api('GET', `/api/ledgers/${S.ledger.id}/verify`).then(r => { const el = $('#integrity'); if (el) el.innerHTML = r.ok
       ? `${RINGS('filled')} Every fingerprint matches its recorded content and order (${r.count} entr${r.count === 1 ? 'y' : 'ies'}).`
       : `<strong class="bad">The stored history doesn’t match its fingerprints at entry ${esc(r.brokenAt)}.</strong> Something changed it outside Handshake.`; }).catch(() => {});
+  } else if (S.view === 'sign' && !binding()) {
+    const rules = toAccept(S.me);
+    v.innerHTML = `<div class="view-head"><h2 class="soft">Agree to “${esc(S.ledger.name)}”</h2><button type="button" class="btn link" data-act="back">Back to the agreement</button></div>
+      <section class="card"><h3>What you’re agreeing to</h3>
+        <p>The ${rules.length} rule${rules.length === 1 ? '' : 's'} everyone had agreed to when you joined. Rules written from now on need your agreement one by one, as they do everyone’s.</p>
+        ${reviewList(rules)}
+        <p class="hint">If something doesn’t work for you, suggest a change or a repeal first. Everyone sees it and can agree to it.</p>
+        ${waitingList(waitingForMe(), 'agree')}
+        <div class="row"><button type="button" class="btn primary" data-act="accept-agreement">${RINGS()}${waitingForMe().length ? 'Agree to the whole agreement and the ticked rules' : 'Agree to the whole agreement'}</button><button type="button" class="btn link" data-act="back">Not now</button></div>
+      </section>`;
   } else if (S.view === 'sign') {
     const keepLs = keepSigFields('ls'), keepConsent = $('#consent-box') && $('#consent-box').checked;
-    const force = L.list.filter(r => r.status === 'force');
+    const force = L.list.filter(r => r.status === 'force' || r.status === 'scheduled');
     v.innerHTML = `<div class="view-head"><h2 class="soft">Sign “${esc(S.ledger.name)}”</h2><button type="button" class="btn link" data-act="back">Back to the agreement</button></div>
       ${S.consent && !S.consent.given ? `<section class="card"><h3>Electronic signatures</h3><p>${esc(S.consent.notice)}</p>
         <label class="check"><input type="checkbox" id="consent-box"><span>I agree to use electronic records and signatures.</span></label></section>` : ''}
       <section class="card"><h3>What you’re signing</h3>
-        <p>${force.length ? `The ${force.length} rule${force.length === 1 ? '' : 's'} in force today, and every rule you sign from now on:` : 'There are no rules in force yet. Signing now covers every rule you sign from now on.'}</p>
-        ${force.length ? `<ol class="sign-rules">${force.map(r => `<li><strong>§ ${fol(r.n)} · ${esc(str(r.title))}</strong><p>${marked(str(r.text))}</p></li>`).join('')}</ol>` : ''}
+        <p>${force.length ? `The ${force.length} rule${force.length === 1 ? '' : 's'} in force today (or signed to take effect later), and every rule you sign from now on:` : 'There are no rules in force yet. Signing now covers every rule you sign from now on.'}</p>
+        ${force.length ? reviewList(force) : ''}
+        ${waitingList(waitingForMe(), 'sign')}
         ${signFields('ls', S.ledger.statement, 'ledger')}
-        <div class="row"><button type="button" class="btn primary" data-act="sign-ledger">${RINGS()}Sign the agreement</button><button type="button" class="btn link" data-act="back">Not now</button></div>
+        <div class="row"><button type="button" class="btn primary" data-act="sign-ledger">${RINGS()}${waitingForMe().length ? 'Sign the agreement and the ticked rules' : 'Sign the agreement'}</button><button type="button" class="btn link" data-act="back">Not now</button></div>
       </section>`;
     restoreSigFields('ls', keepLs); if (keepConsent && $('#consent-box')) $('#consent-box').checked = true;
   }
@@ -1503,6 +1574,18 @@ async function leaveLedger() {
     toast(`You’ve left “${name}”.`);
   } catch (e) { toast(e.message || 'Couldn’t leave the agreement.'); }
 }
+async function acceptAgreement() {
+  try {
+    const also = alsoTicked();
+    const out = await api('POST', `/api/ledgers/${S.ledger.id}/accept`, { headHash: S.ledger.head, entries: also.map(r => r.id) });
+    await refresh();
+    setView('ledger');
+    toast(`You’ve agreed to the whole agreement${out.agreed ? ` and ${out.agreed} rule${out.agreed === 1 ? '' : 's'}` : ''}.`);
+  } catch (e) {
+    toast(e.message || 'Couldn’t record that. Try again.');
+    if (e.code === 'stale') { await refresh(); renderView(); }
+  }
+}
 async function signLedger() {
   const sig = readSignature('ls');
   if (!sig) return;
@@ -1512,10 +1595,11 @@ async function signLedger() {
       if (!c || !c.checked) { if (c) c.focus(); toast('Agree to use electronic records and signatures first.'); return; }
       await api('POST', '/api/esign-consent', { version: S.consent.version });
     }
-    await api('POST', `/api/ledgers/${S.ledger.id}/sign`, Object.assign({ headHash: S.ledger.head }, sig));
+    const also = alsoTicked();
+    const out = await api('POST', `/api/ledgers/${S.ledger.id}/sign`, Object.assign({ headHash: S.ledger.head, entries: also.map(r => ({ id: r.id, entryHash: r.hash })) }, sig));
     await refresh();
     setView('ledger');
-    toast('You’ve signed the agreement. You can now sign rules in it.');
+    toast(out.signed ? `You’ve signed the agreement and ${out.signed} rule${out.signed === 1 ? '' : 's'}.` : 'You’ve signed the agreement. You can now sign rules in it.');
   } catch (e) {
     toast(e.message || 'Couldn’t sign just now. Try again.');
     if (e.code === 'stale') { await refresh(); renderView(); }
@@ -1610,7 +1694,7 @@ async function refresh() {
   if (key === lastKey) return;
   lastKey = key;
   S.ledger = st.ledger; S.members = st.members; S.former = st.formerMembers || []; S.rules = st.entries; S.agr = st.agreements; S.loaded = true;
-  S.consent = st.consent; S.ledgerSigs = st.ledgerSignatures || []; S.sigs = st.signatures || []; S.myEmail = st.myEmail; S.mail = st.mail;
+  S.consent = st.consent; S.ledgerSigs = st.ledgerSignatures || []; S.accepts = st.acceptances || []; S.sigs = st.signatures || []; S.myEmail = st.myEmail; S.mail = st.mail;
   renderToolbar();
   if (S.view === 'ledger') onData(); else { derive(); renderView(); }
   renderBindbar();

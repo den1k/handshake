@@ -83,6 +83,11 @@ sql.exec(`
   CREATE TRIGGER IF NOT EXISTS esign_consents_no_update BEFORE UPDATE ON esign_consents BEGIN SELECT RAISE(ABORT, 'append-only'); END;
   CREATE TRIGGER IF NOT EXISTS esign_consents_no_delete BEFORE DELETE ON esign_consents BEGIN SELECT RAISE(ABORT, 'append-only'); END;
   CREATE TRIGGER IF NOT EXISTS ledger_signatures_no_update BEFORE UPDATE ON ledger_signatures BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+  -- Joining an agreement that already has rules in force: agreeing to it as a whole, once (legally binding
+  -- agreements use the agreement signature for this). Append-only, with the agreement's fingerprint at the time.
+  CREATE TABLE IF NOT EXISTS acceptances (ledger_id TEXT NOT NULL REFERENCES ledgers(id), user_id TEXT NOT NULL REFERENCES users(id), at TEXT NOT NULL, head_hash TEXT NOT NULL, entry_count INTEGER NOT NULL, ip TEXT NOT NULL, ua TEXT NOT NULL, PRIMARY KEY (ledger_id, user_id, at)) STRICT;
+  CREATE TRIGGER IF NOT EXISTS acceptances_no_update BEFORE UPDATE ON acceptances BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS acceptances_no_delete BEFORE DELETE ON acceptances BEGIN SELECT RAISE(ABORT, 'append-only'); END;
   CREATE TRIGGER IF NOT EXISTS ledger_signatures_no_delete BEFORE DELETE ON ledger_signatures BEGIN SELECT RAISE(ABORT, 'append-only'); END;
   CREATE TRIGGER IF NOT EXISTS entry_signatures_no_update BEFORE UPDATE ON entry_signatures BEGIN SELECT RAISE(ABORT, 'append-only'); END;
   CREATE TRIGGER IF NOT EXISTS entry_signatures_no_delete BEFORE DELETE ON entry_signatures BEGIN SELECT RAISE(ABORT, 'append-only'); END;
@@ -153,7 +158,10 @@ const q = {
     FROM invites i JOIN ledgers l ON l.id = i.ledger_id JOIN users u ON u.id = i.created_by WHERE i.token = ?`),
   useInvite: sql.prepare('UPDATE invites SET used_by = ?, used_at = ? WHERE token = ? AND used_by IS NULL'),
   addEntry: sql.prepare('INSERT INTO entries (id, ledger_id, author_id, created_at, required, doc) VALUES (?, ?, ?, ?, ?, ?)'),
-  entry: sql.prepare('SELECT ledger_id, author_id, required, doc FROM entries WHERE id = ?'),
+  entry: sql.prepare('SELECT ledger_id, author_id, created_at, required, doc FROM entries WHERE id = ?'),
+  entryAgreements: sql.prepare('SELECT user_id, at FROM entry_agreements WHERE entry_id = ?'),
+  addAcceptance: sql.prepare('INSERT OR IGNORE INTO acceptances (ledger_id, user_id, at, head_hash, entry_count, ip, ua) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+  acceptances: sql.prepare('SELECT user_id, at FROM acceptances WHERE ledger_id = ? ORDER BY at'),
   entries: sql.prepare('SELECT id, author_id, created_at, required, doc FROM entries WHERE ledger_id = ? ORDER BY created_at, id'),
   entryIds: sql.prepare('SELECT id FROM entries WHERE ledger_id = ?'),
   agree: sql.prepare('INSERT OR IGNORE INTO entry_agreements (entry_id, user_id, at) VALUES (?, ?, ?)'),
@@ -454,7 +462,7 @@ async function askModel(prompt, res) {
 /* ---------- ledgers ---------- */
 const clientIp = req => String((TRUST_PROXY && String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '').slice(0, 64);
 const clientUa = req => String(req.headers['user-agent'] || '').slice(0, 300);
-const ledgerStatement = (l, count, head) => `I have read the rules recorded in the agreement “${l.name}” (${count} entr${count === 1 ? 'y' : 'ies'}, fingerprint ${head}). I intend to be legally bound by every rule in it that is in force, and by each rule I sign from now on${l.governing_law ? `, under ${l.governing_law}` : ''}. I am signing electronically.`;
+const ledgerStatement = (l, count, head) => `I have read the rules recorded in the agreement “${l.name}” (${count} entr${count === 1 ? 'y' : 'ies'}, fingerprint ${head}). I intend to be legally bound by every rule in it that is in force or signed to take effect later, and by each rule I sign from now on${l.governing_law ? `, under ${l.governing_law}` : ''}. I am signing electronically.`;
 // A rule in a legally binding agreement can carry an effective date: a calendar day, from the start of that day UTC.
 // It is part of the recorded text, so the fingerprint and every signature cover it.
 const isDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v;
@@ -493,21 +501,30 @@ function notifyLedger(lid, me, eid, agreed) {
   if (!agreed) body = repeal ? `${me.name} proposed repealing ${targets}` : `${me.name} added ${label(eid)}${targets ? `, replacing ${targets}` : ''}`;
   else {
     const has = new Set(q.agreements.all(lid).filter(a => a.entry_id === eid).map(a => a.user_id));
-    const done = neededFor(lid, ent, has).every(u => has.has(u)), signed = !!l.binding_since;
+    const done = neededFor(lid, eid).every(u => has.has(u)), signed = !!l.binding_since;
     body = `${me.name} ${signed ? 'signed' : 'agreed to'} ${repeal ? `${signed ? 'the repeal of' : 'repeal'} ${targets}` : label(eid)}.${done ? ` Everyone has ${signed ? 'signed' : 'agreed'}.` : ''}`;
   }
   notify(q.members.all(lid).map(m => m.id).filter(id => id !== me.id), { title: l.name, body, url: `/?l=${encodeURIComponent(lid)}` });
 }
-// Who an entry needs: the members it required who are still members, plus anyone who agreed before leaving.
-// Leaving stops blocking pending entries; what someone agreed to or signed stays on record.
-const neededFor = (lid, ent, agreed) => JSON.parse(ent.required).filter(u => agreed.has(u) || q.member.get(lid, u));
+// Who an entry needs: the members it required who are still members, plus anyone who agreed before leaving (leaving
+// stops blocking; what someone agreed to stays on record), plus anyone who joined while it was still waiting. Joining
+// means agreeing to the agreement as a whole, which covers what everyone had already agreed to, not what was pending.
+function neededFor(lid, eid) {
+  const ent = q.entry.get(eid);
+  if (!ent) return [];
+  const agreed = new Map(q.entryAgreements.all(eid).map(a => [a.user_id, a.at]));
+  const base = JSON.parse(ent.required).filter(u => agreed.has(u) || q.member.get(lid, u));
+  const doneAt = base.length && base.every(u => agreed.has(u)) ? base.map(u => agreed.get(u)).sort().pop() : '';
+  const late = q.members.all(lid).filter(m => !base.includes(m.id) && m.joined_at > ent.created_at && !(doneAt && doneAt <= m.joined_at)).map(m => m.id);
+  return base.concat(late);
+}
 const signersOf = (lid, eid) => new Set(q.entrySigs.all(lid).filter(s => s.entry_id === eid).map(s => s.user_id));
-const allSigned = (lid, eid) => { const ent = q.entry.get(eid), s = signersOf(lid, eid); return !!ent && neededFor(lid, ent, s).every(u => s.has(u)); };
+const allSigned = (lid, eid) => { const s = signersOf(lid, eid), need = neededFor(lid, eid); return need.length > 0 && need.every(u => s.has(u)); };
 // When the last required signature lands, everyone gets the certificate by email.
 function mailIfComplete(lid, eid) {
   const ent = q.entry.get(eid);
   if (!ent || !allSigned(lid, eid)) return;
-  const req = neededFor(lid, ent, signersOf(lid, eid));
+  const req = neededFor(lid, eid);
   const l = q.ledger.get(lid), doc = JSON.parse(q.fullEntries.all(lid).find(x => x.id === eid).doc), n = entryNumber(lid, eid);
   sendMail({ to: req.map(u => (q.user.get(u) || {}).email), subject: `Signed by everyone: § ${n} · ${doc.title || 'Untitled'} (${l.name})`,
     text: `Everyone has signed § ${n} of “${l.name}”. ${doc.effectiveOn > now().slice(0, 10) ? `It takes effect on ${longDay(doc.effectiveOn)}.` : 'It is now in effect.'}\n\n${doc.text}\n\nThe certificate is attached as the HTML version of this email, and online at ${BASE_URL}/certificate/${lid}/${eid}`,
@@ -535,6 +552,7 @@ function ledgerState(lid, me) {
       .map(u => q.user.get(u)).filter(Boolean).map(u => ({ id: u.id, name: u.name })),
     entries: ents.map(e => Object.assign(JSON.parse(e.doc), { id: e.id, authorId: e.author_id, createdAt: e.created_at, required: JSON.parse(e.required), hash: hashes.get(e.id) || '' })),
     agreements: q.agreements.all(lid).map(a => ({ entryId: a.entry_id, userId: a.user_id, at: a.at })),
+    acceptances: q.acceptances.all(lid).map(a => ({ userId: a.user_id, at: a.at })),
   };
 }
 // What a client may store in an entry. Everything that says who and when is set by the server.
@@ -572,7 +590,7 @@ function certificateHtml(lid, eid) {
   if (eid) {
     const ent = q.fullEntries.all(lid).find(x => x.id === eid), h = ent && q.entryHash.get(eid);
     if (!ent) return null;
-    const doc = JSON.parse(ent.doc), signers = signersOf(lid, eid), req = neededFor(lid, ent, signers);
+    const doc = JSON.parse(ent.doc), signers = signersOf(lid, eid), req = neededFor(lid, eid);
     const sigs = q.entrySigs.all(lid).filter(s => s.entry_id === eid);
     const done = req.every(u => signers.has(u));
     title = `§ ${h.seq} · ${doc.title || 'Untitled'}`;
@@ -814,6 +832,25 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Leaving: members only (the author stays). Past signatures and agreements stay on record.
+      // Joining an agreement that already has rules: agree to all of it, as it stands, in one go.
+      if (req.method === 'POST' && parts[3] === 'accept' && parts.length === 4) {
+        const l = q.ledger.get(lid);
+        if (l.binding_since) return send(res, 409, { code: 'binding', message: 'This agreement is legally binding: sign it instead.' });
+        const { headHash, entries } = await readBody(req);
+        const head = headOf(lid);
+        if (headHash !== head.hash) return send(res, 409, { code: 'stale', message: 'The agreement changed while you were reading it. Review it again.' });
+        q.addAcceptance.run(lid, me.id, now(), head.hash, head.count, clientIp(req), clientUa(req));
+        notify(q.members.all(lid).map(m => m.id).filter(id => id !== me.id), { title: l.name, body: `${me.name} agreed to the whole agreement.`, url: `/?l=${encodeURIComponent(lid)}` });
+        // The rules still waiting for this member can be agreed in the same step.
+        let agreed = 0;
+        for (const eid of Array.isArray(entries) ? entries.slice(0, 200).map(String) : []) {
+          const e = q.entry.get(eid);
+          if (!e || e.ledger_id !== lid || !neededFor(lid, eid).includes(me.id)) continue;
+          if (q.agree.run(eid, me.id, now()).changes) { agreed++; notifyLedger(lid, me, eid, true); }
+        }
+        return send(res, 200, { ok: true, agreed });
+      }
+
       if (req.method === 'POST' && parts[3] === 'leave' && parts.length === 4) {
         if (q.member.get(lid, me.id).role === 'owner') return send(res, 409, { code: 'owner', message: 'The agreement’s author can’t leave it.' });
         // Rules that were only waiting on this member come into effect; in a binding agreement, mail their certificates.
@@ -856,7 +893,17 @@ const server = http.createServer(async (req, res) => {
         sendMail({ to: [me.email], subject: `You signed the agreement “${l.name}”`,
           text: `You signed the agreement “${l.name}” as “${name}”. Your copy of the agreement certificate is the HTML version of this email, and online at ${BASE_URL}/certificate/${lid}`,
           html: certificateHtml(lid).html });
-        return send(res, 201, { ok: true });
+        // The rules waiting for this signer can be signed in the same step (one code covers it); each still gets
+        // its own signature, over its own fingerprint and statement.
+        const signed = [];
+        for (const it of Array.isArray(body.entries) ? body.entries.slice(0, 200) : []) {
+          const eid = String(it && it.id), e = q.entry.get(eid), h = q.entryHash.get(eid);
+          if (!e || e.ledger_id !== lid || !h || it.entryHash !== h.hash || !neededFor(lid, eid).includes(me.id)) continue;
+          const at = now();
+          const added = tx(() => { const c = q.agree.run(eid, me.id, at).changes; if (c) q.addEntrySig.run(eid, me.id, at, name, entryStatement(l, h.seq, h.hash, JSON.parse(e.doc).effectiveOn), h.hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || ''); return c; });
+          if (added) { signed.push(eid); mailIfComplete(lid, eid); notifyLedger(lid, me, eid, true); }
+        }
+        return send(res, 201, { ok: true, signed: signed.length });
       }
 
       if (req.method === 'POST' && parts[3] === 'invites' && parts.length === 4) {
@@ -920,7 +967,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && parts[3] === 'entries' && parts[5] === 'agree' && parts.length === 6) {
         const e = q.entry.get(parts[4]);
         if (!e || e.ledger_id !== lid) return send(res, 404, { code: 'not_found', message: 'No such entry.' });
-        if (!JSON.parse(e.required).includes(me.id)) return send(res, 403, { code: 'forbidden', message: 'You weren’t a member when this entry was written, so it doesn’t need your agreement.' });
+        if (!neededFor(lid, parts[4]).includes(me.id)) return send(res, 403, { code: 'forbidden', message: 'This entry doesn’t need your agreement on its own: it was already agreed when you joined, and agreeing to the whole agreement covers it.' });
         const l = q.ledger.get(lid);
         if (!l.binding_since) {
           if (q.agree.run(parts[4], me.id, now()).changes) notifyLedger(lid, me, parts[4], true);

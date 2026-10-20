@@ -15,6 +15,13 @@ kept as a ledger: rules are added and superseded, never edited or erased.
   yet. A rule that replaces another only does so once it is itself in effect.
 - Entries are never edited or deleted; a new entry supersedes or repeals an older one.
   Click any rule's title to see every rule connected to it, earlier and later.
+- Joining means agreeing to the whole agreement. Someone who joins after rules were agreed
+  reviews them and agrees to all of them at once (recorded with the agreement's fingerprint),
+  ticking off any rules still waiting for them in the same step, or first suggests a change or
+  a repeal. Until then their line is dashed and everyone sees who hasn't agreed yet. Rules
+  still waiting when someone joins need their agreement too.
+- Anyone can **Suggest a change** to a rule that's still waiting: if everyone agrees to the new
+  version, the original is closed as replaced.
 
 ## Legally binding agreements
 
@@ -24,9 +31,11 @@ in the agreement's **Settings** (author only, and it can't be switched off again
 1. Each member accepts, once per account, a notice about using electronic records and
    signatures.
 2. Each member signs the agreement once: they read the rules in force, type their full legal
-   name and confirm they intend to be legally bound. The signature covers the agreement's
-   history as they saw it (its current fingerprint) and every rule they sign afterwards.
-   Members who join later do the same.
+   name and press **Sign**, next to the statement that they intend to be legally bound (the
+   press is the intent; there's no box to tick each time). The signature covers the
+   agreement's history as they saw it (its current fingerprint) and every rule they sign
+   afterwards. Members who join later do the same, and can sign the rules waiting for them in
+   the same step: each still gets its own signature over its own fingerprint.
 3. Every new rule is signed the same way, by its author on saving and by each member with
    **Agree and sign**. A signature names the fingerprint of the exact text signed; the
    server refuses it if that text isn't what was recorded.
