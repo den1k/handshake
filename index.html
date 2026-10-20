@@ -146,6 +146,9 @@ code { font-size: .9em; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; }
 .panel h3 { margin: 0; font: 700 1.05rem var(--f-text); }
 .panel input[type="text"], .panel input[type="email"] { max-width: 34rem; }
+#draft-head { flex-wrap: wrap; }
+.banner.swap { flex-basis: 100%; display: grid; gap: .6rem; background: var(--blank); border-color: var(--edge-case); }
+.banner.swap p { margin: 0; font-weight: 700; }
 /* Legally binding ledgers: status bar, settings and signing views, signature fields */
 .bindbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .7rem 1.5rem; border-bottom: 1px solid var(--rule); background: var(--accent-soft); font-size: .9rem; }
 .bindbar.todo { background: var(--blank); }
@@ -566,11 +569,11 @@ const S = { user: null, me: null, ledgers: [], ledger: null, members: [], former
   status: 'connecting', loaded: false, rules: [], agr: [], filter: 'all', q: '', newest: false,
   open: new Set(), profiles: {}, pendingJump: null, showAll: false, scrolled: false, focus: null, ai: null };
 let L = { list: [], byId: new Map(), lanes: [] };
-const T = { busy: false, busyAt: 'top', ctl: null, progress: '', error: '', saving: false, discardArm: false, scrollTo: null };
+const T = { busy: false, busyAt: 'top', ctl: null, progress: '', error: '', saving: false, discardArm: false, scrollTo: null, swap: null };
 
 function blankDraft() {
   return { mode: 'rule', text: '', firstText: '', title: '', titleTouched: false, checked: false, checkedText: '',
-    related: [], resolve: {}, edges: [], include: {}, supersedes: [], amending: null, reason: '', effectiveOn: '', entryId: null };
+    related: [], resolve: {}, edges: [], include: {}, supersedes: [], amending: null, reason: '', effectiveOn: '', entryId: null, touched: false };
 }
 function loadDraft() {
   try { const v = JSON.parse(localStorage.getItem(draftKey()) || 'null'); if (v && typeof v === 'object') return Object.assign(blankDraft(), v); } catch (e) {}
@@ -976,10 +979,17 @@ function syncFilter() {
 const undecided = () => D.related.filter(r => r.kind === 'contradicts' && !D.resolve[r.ruleId] && !D.supersedes.includes(r.ruleId)
   && L.byId.get(r.ruleId) && L.byId.get(r.ruleId).status === 'force');
 
+// What a draft is, in words: for the composer's heading and for the choice between two drafts.
+const draftWhat = d => { const t = L.byId.get((d.supersedes || [])[0]);
+  return d.mode === 'repeal' ? `repeal of § ${t ? fol(t.n) : '?'}` : d.amending && t ? `${t.status === 'pending' ? 'change to' : 'amendment of'} § ${fol(t.n)}` : 'new rule'; };
+const sameDraft = (a, b) => (a.mode || 'rule') === (b.mode || 'rule') && (a.amending || null) === (b.amending || null) && String((a.supersedes || [])[0] || '') === String((b.supersedes || [])[0] || '');
 function openComposer(preset) {
   if (!S.ledger) return;
-  if (preset) {
-    if (draftHasContent()) toast('Finish or discard the open draft first.');
+  // One draft per agreement. A different action replaces a draft nobody has edited; an edited one is kept and the
+  // composer asks whether to discard it.
+  T.swap = null;
+  if (preset && !sameDraft(D, preset)) {
+    if (draftHasContent() && D.touched) T.swap = preset;
     else { D = Object.assign(blankDraft(), preset); saveDraft(); }
   }
   T.discardArm = false; S.showAll = false; S.focus = null;
@@ -990,7 +1000,7 @@ function openComposer(preset) {
   $('#draft').scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' });
 }
 function closeComposer() {
-  saveDraft();
+  saveDraft(); T.swap = null;
   $('#draft').hidden = true; S.showAll = false;
   renderLedger();
 }
@@ -1001,8 +1011,11 @@ function renderComposer() {
   derive();
   const next = fol(L.list.length + 1);
   $('#draft-num').textContent = next;
-  $('#draft-head').innerHTML = `<div><p class="eyebrow">${RINGS()}${D.mode === 'repeal' ? 'Repeal' : 'New entry'} · § ${next}</p><h2 id="draft-title">${D.mode === 'repeal' ? 'Repeal a rule' : 'Write a rule'}</h2></div>
-    <button type="button" class="icon-btn" data-act="close" aria-label="Put the draft away. It is kept.">×</button>`;
+  const what = draftWhat(D), target = L.byId.get(D.supersedes[0]);
+  const title = D.mode === 'repeal' ? `Repeal § ${target ? fol(target.n) : ''}` : D.amending && target ? `${target.status === 'pending' ? 'Suggest a change to' : 'Amend'} § ${fol(target.n)}` : 'Write a rule';
+  $('#draft-head').innerHTML = `<div><p class="eyebrow">${RINGS()}§ ${next} · ${D.mode === 'repeal' ? 'Repeal' : D.amending ? (target && target.status === 'pending' ? 'Suggested change' : 'Amendment') : 'New rule'}</p><h2 id="draft-title">${esc(title)}</h2></div>
+    <button type="button" class="icon-btn" data-act="close" aria-label="Put the draft away. It is kept.">×</button>
+    ${T.swap ? `<div class="banner swap" role="alert"><p>You have an unsaved ${esc(what)}.</p><div class="row"><button type="button" class="btn small primary" data-act="swap-draft">Discard it and start the ${esc(draftWhat(T.swap))}</button><button type="button" class="btn link" data-act="keep-draft">Keep editing it</button></div></div>` : ''}`;
   $('#draft-body').innerHTML = D.mode === 'repeal' ? repealHTML() : ruleHTML();
   renderFoot();
 }
@@ -1184,6 +1197,7 @@ async function check() {
 
 /* Ticking an edge case adds its sentence to the wording; unticking takes it out again. */
 function toggleEdge(i, on) {
+  D.touched = true;
   const e = D.edges[i];
   if (!e) return;
   const fresh = D.checked && str(D.text) === D.checkedText;
@@ -1301,6 +1315,8 @@ document.addEventListener('click', e => {
       D.resolve[id] = b.dataset.res;
       saveSoon(); renderLedger(); renderComposer(); break;
     case 'record': record(); break;
+    case 'swap-draft': if (T.ctl) T.ctl.abort(); D = Object.assign(blankDraft(), T.swap); T.swap = null; T.error = ''; saveDraft(); renderLedger(); renderComposer(); break;
+    case 'keep-draft': T.swap = null; renderComposer(); break;
     case 'discard':
       if (T.discardArm) {
         if (T.ctl) T.ctl.abort();
@@ -1357,6 +1373,7 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q') { S.q = t.value; renderLedger(); return; }
   if (!$('#draft').contains(t)) return;
+  if (/^d-/.test(t.id)) D.touched = true;
   if (t.id === 'd-text') { D.text = t.value; const b = $('#check1'); if (b) b.disabled = !str(t.value); }
   else if (t.id === 'd-title') { D.title = t.value; D.titleTouched = true; }
   else if (t.id === 'd-reason') D.reason = t.value;
