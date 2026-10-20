@@ -566,8 +566,9 @@ function certificateHtml(lid, eid) {
   if (eid) {
     const ent = q.fullEntries.all(lid).find(x => x.id === eid), h = ent && q.entryHash.get(eid);
     if (!ent) return null;
-    const doc = JSON.parse(ent.doc), signers = signersOf(lid, eid);
-    const done = neededFor(lid, ent, signers).every(u => signers.has(u));
+    const doc = JSON.parse(ent.doc), signers = signersOf(lid, eid), req = neededFor(lid, ent, signers);
+    const sigs = q.entrySigs.all(lid).filter(s => s.entry_id === eid);
+    const done = req.every(u => signers.has(u));
     title = `§ ${h.seq} · ${doc.title || 'Untitled'}`;
     body = `<p class="state ${done ? 'ok' : 'wait'}">${done ? 'Signed by every required member' : 'Not yet signed by every required member'}</p>
       <h2>Text as recorded</h2><blockquote>${e(doc.text)}</blockquote>
