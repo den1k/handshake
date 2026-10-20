@@ -145,6 +145,11 @@ code { font-size: .9em; }
 .panel { padding: 1rem 1.5rem 1.2rem; border-bottom: 1px solid var(--grid); background: var(--accent-soft); display: grid; gap: .7rem; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; }
 .panel h3 { margin: 0; font: 700 1.05rem var(--f-text); }
+.creating .app-in > :not(#panel) { display: none; }
+.creating #panel { padding: 1.6rem 1.75rem 2rem; border-bottom: 0; background: var(--page); gap: 1rem; }
+.creating #panel h3 { font: 700 1.6rem/1.1 var(--f-display); letter-spacing: -.02em; }
+.creating .side-item[aria-current="page"] { background: none; box-shadow: none; }
+.creating .side-item.new { background: var(--page); box-shadow: 0 0 0 1px var(--rule); color: var(--ink); }
 .panel input[type="text"], .panel input[type="email"] { max-width: 34rem; }
 #draft-head { flex-wrap: wrap; }
 .banner.swap { flex-basis: 100%; display: grid; gap: .6rem; background: var(--blank); border-color: var(--edge-case); }
@@ -1364,7 +1369,7 @@ document.addEventListener('click', e => {
     }
     case 'repeal': if (S.view !== 'ledger') setView('ledger', 'replace'); openComposer({ mode: 'repeal', supersedes: [id] }); break;
     case 'new-ledger': showPanel('new-ledger'); break;
-    case 'open-ledger': openLedger(b.dataset.id, 'push'); break;
+    case 'open-ledger': showPanel(null); openLedger(b.dataset.id, 'push'); break;
     case 'create-ledger': createLedger(); break;
     case 'settings': if (drafting()) closeComposer(); setView('settings'); break;
     case 'back': leaveView(); break;
@@ -1490,8 +1495,11 @@ const newLedgerForm = () => `<div class="new-ledger">
 
 function showPanel(kind, data) {
   const p = $('#panel');
+  // A new agreement takes the whole page, so the one you were on doesn't look like it's being changed.
+  document.body.classList.toggle('creating', kind === 'new-ledger');
   if (!kind) { p.hidden = true; p.innerHTML = ''; return; }
   p.hidden = false;
+  if (kind === 'new-ledger') window.scrollTo({ top: 0 });
   if (kind === 'new-ledger') {
     p.innerHTML = `<div class="panel-head"><h3>New agreement</h3><button type="button" class="btn link" data-act="close-panel">Cancel</button></div>${newLedgerForm()}`;
     const i = $('#ledger-name'); if (i) i.focus();
