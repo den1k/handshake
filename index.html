@@ -1312,16 +1312,16 @@ document.addEventListener('click', e => {
     case 'agree': agree(id); break;
     case 'amend': {
       const r = L.byId.get(id); if (!r) break;
-      if (S.view !== 'ledger') setView('ledger');
+      if (S.view !== 'ledger') setView('ledger', 'replace');
       openComposer({ text: str(r.text), title: str(r.title), titleTouched: true, supersedes: [r.id], amending: r.id });
       break;
     }
-    case 'repeal': if (S.view !== 'ledger') setView('ledger'); openComposer({ mode: 'repeal', supersedes: [id] }); break;
+    case 'repeal': if (S.view !== 'ledger') setView('ledger', 'replace'); openComposer({ mode: 'repeal', supersedes: [id] }); break;
     case 'new-ledger': showPanel('new-ledger'); break;
-    case 'open-ledger': openLedger(b.dataset.id); break;
+    case 'open-ledger': openLedger(b.dataset.id, 'push'); break;
     case 'create-ledger': createLedger(); break;
     case 'settings': if (drafting()) closeComposer(); setView('settings'); break;
-    case 'back': setView('ledger'); break;
+    case 'back': leaveView(); break;
     case 'save-settings': saveSettings(); break;
     case 'sign-ledger-view': if (drafting()) closeComposer(); setView('sign'); break;
     case 'sign-ledger': signLedger(); break;
@@ -1480,8 +1480,31 @@ function renderBindbar() {
     ? `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 4v4c0 3.3 2.4 5.6 5.5 6.5 3.1-.9 5.5-3.2 5.5-6.5V4z"/></svg><p><strong>Legally binding</strong>${S.ledger.governingLaw ? ` · ${esc(S.ledger.governingLaw)}` : ''} · you signed the agreement ${esc(fmtWhen(S.ledgerSigs.find(s => s.userId === S.me).at))}${unsigned.length ? ` · <span class="dim">waiting for ${esc(listJoin(unsigned.map(m => firstName(m.id))))} to sign it</span>` : ''}</p><button type="button" class="btn link" data-act="settings">Details</button>`
     : `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 4v4c0 3.3 2.4 5.6 5.5 6.5 3.1-.9 5.5-3.2 5.5-6.5V4z"/></svg><p><strong>This agreement is legally binding.</strong> Review and sign it before you sign any rules in it.</p><button type="button" class="btn primary small" data-act="sign-ledger-view">Review and sign</button>`;
 }
-function setView(v) {
+/* Each agreement and view has its own address (/?l=<agreement>&v=settings|sign), so Back and Forward move within
+   Handshake. 'push' records a step someone took, 'replace' corrects the current entry, 'none' follows the address. */
+function remember(how) {
+  if (how === 'none') return;
+  const p = new URLSearchParams();
+  if (S.ledger) p.set('l', S.ledger.id);
+  if (S.view !== 'ledger') p.set('v', S.view);
+  const u = '/?' + p;
+  if (u === location.pathname + location.search) return;
+  const state = { hs: 1, back: how === 'push' && S.view !== 'ledger' };
+  if (how === 'push') history.pushState(state, '', u); else history.replaceState(state, '', u);
+}
+// Leave settings or signing for the agreement: step back if we came from it, otherwise just show it.
+function leaveView() {
+  if (history.state && history.state.back) history.back(); else setView('ledger', 'replace');
+}
+window.addEventListener('popstate', async () => {
+  if (!S.user) return;
+  const p = new URLSearchParams(location.search), id = p.get('l'), v = p.get('v');
+  if (id && (!S.ledger || S.ledger.id !== id)) await openLedger(id, 'none');
+  if (S.ledger) setView(v === 'settings' || v === 'sign' ? v : 'ledger', 'none');
+});
+function setView(v, how = 'push') {
   S.view = v;
+  remember(how);
   const ledger = v === 'ledger';
   $('#ledger').hidden = !ledger; $('#view').hidden = ledger;
   if (!ledger) { $('#tools').hidden = true; $('#newBtn').hidden = true; } else renderLedger();
@@ -1579,7 +1602,7 @@ async function acceptAgreement() {
     const also = alsoTicked();
     const out = await api('POST', `/api/ledgers/${S.ledger.id}/accept`, { headHash: S.ledger.head, entries: also.map(r => r.id) });
     await refresh();
-    setView('ledger');
+    leaveView();
     toast(`You’ve agreed to the whole agreement${out.agreed ? ` and ${out.agreed} rule${out.agreed === 1 ? '' : 's'}` : ''}.`);
   } catch (e) {
     toast(e.message || 'Couldn’t record that. Try again.');
@@ -1598,7 +1621,7 @@ async function signLedger() {
     const also = alsoTicked();
     const out = await api('POST', `/api/ledgers/${S.ledger.id}/sign`, Object.assign({ headHash: S.ledger.head, entries: also.map(r => ({ id: r.id, entryHash: r.hash })) }, sig));
     await refresh();
-    setView('ledger');
+    leaveView();
     toast(out.signed ? `You’ve signed the agreement and ${out.signed} rule${out.signed === 1 ? '' : 's'}.` : 'You’ve signed the agreement. You can now sign rules in it.');
   } catch (e) {
     toast(e.message || 'Couldn’t sign just now. Try again.');
@@ -1652,7 +1675,7 @@ async function createLedger() {
     const { id } = await api('POST', '/api/ledgers', { name, binding: bind, governingLaw: str($('#ledger-law') && $('#ledger-law').value) });
     await loadMe();
     showPanel(null);
-    await openLedger(id);
+    await openLedger(id, 'push');
     toast(bind ? `“${name}” is ready and legally binding. Sign it, then invite the others.` : `“${name}” is ready. Invite the others when you like.`);
   } catch (e) { toast(e.message || 'Couldn’t create the agreement.'); }
 }
@@ -1699,7 +1722,7 @@ async function refresh() {
   if (S.view === 'ledger') onData(); else { derive(); renderView(); }
   renderBindbar();
 }
-async function openLedger(id) {
+async function openLedger(id, how = 'replace') {
   if (!S.ledgers.some(l => l.id === id)) id = S.ledgers.length ? S.ledgers[0].id : null;
   if (!id) return showGate('no-ledgers');
   if (S.ledger && S.ledger.id === id && S.loaded) return;
@@ -1709,7 +1732,7 @@ async function openLedger(id) {
   S.ledgerSigs = []; S.sigs = []; S.signing = null; S.view = 'ledger'; $('#view').hidden = true; $('#ledger').hidden = false;
   D = loadDraft() || blankDraft();
   try { localStorage.setItem('handshake.ledger', id); } catch (e) {}
-  history.replaceState(null, '', '/?l=' + encodeURIComponent(id));
+  remember(how);
   showGate(null); renderToolbar(); renderLedger();
   await refresh();
 }
@@ -1727,7 +1750,7 @@ async function acceptInvite() {
     const { ledgerId } = await api('POST', `/api/invites/${encodeURIComponent(S.invite.token)}/accept`, {});
     S.invite = null;
     await loadMe();
-    await openLedger(ledgerId);
+    await openLedger(ledgerId, 'push');
     toast('You’ve joined. Rules written from now on need your agreement too.');
   } catch (e) { toast(e.message || 'Couldn’t join. Try again.'); }
 }
@@ -1752,7 +1775,10 @@ async function boot() {
   let want = new URLSearchParams(location.search).get('l');
   try { want = want || localStorage.getItem('handshake.ledger'); } catch (e) {}
   if (!S.ledgers.length) { showGate('no-ledgers'); startPolling(); return; }
+  // An address that names a view (a reload, or a link to settings) opens it.
+  const v = new URLSearchParams(location.search).get('v');
   await openLedger(want);
+  if (S.ledger && (v === 'settings' || v === 'sign')) setView(v, 'replace');
   startPolling();
 }
 // Pick up agreements and entries from the other members.
