@@ -1,4 +1,8 @@
 <title>Handshake</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#f6f2ec">
 <script>try {
   /* One-time move from the keys used before the renames (Rule Ledger, then Pact). */
   for (const old of ['pact.', 'rule-ledger.']) for (const k of ['draft.v1', 'me', 'theme']) {
@@ -1183,6 +1187,7 @@ document.addEventListener('click', e => {
     case 'copy-invite': { const i = $('#invite-url'); if (i) { i.select(); navigator.clipboard && navigator.clipboard.writeText(i.value).then(() => toast('Invite link copied.'), () => {}); } break; }
     case 'close-panel': showPanel(null); break;
     case 'sign-out': signOut(); break;
+    case 'notify': toggleNotify(); break;
     case 'accept-invite': acceptInvite(); break;
     case 'decline-invite': leaveInvite(); break;
     case 'filter': S.filter = b.dataset.f; syncFilter(); renderLedger(); break;
@@ -1416,7 +1421,34 @@ function renderAccount() {
   const a = $('#account');
   if (!S.user) { a.hidden = true; return; }
   a.hidden = false;
-  a.innerHTML = `${S.user.picture ? `<img src="${esc(S.user.picture)}" alt="" referrerpolicy="no-referrer">` : ''}<span>${esc(S.user.name)}</span><button type="button" class="btn link" data-act="sign-out">Sign out</button>`;
+  a.innerHTML = `${S.user.picture ? `<img src="${esc(S.user.picture)}" alt="" referrerpolicy="no-referrer">` : ''}<span>${esc(S.user.name)}</span>${S.push === 'none' ? '' : `<button type="button" class="btn link" data-act="notify" aria-pressed="${S.push === 'on'}">${S.push === 'on' ? 'Notifications on' : 'Turn on notifications'}</button>`}<button type="button" class="btn link" data-act="sign-out">Sign out</button>`;
+}
+
+/* ---------- notifications ----------
+   S.push: 'on' or 'off' for this device, 'ios' when iOS only allows it once Handshake is on the Home Screen, 'none' when unavailable. */
+const pushReady = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+async function pushState() {
+  if (!pushReady()) return /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'ios' : 'none';
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  return sub && Notification.permission === 'granted' ? 'on' : 'off';
+}
+async function toggleNotify() {
+  if (S.push === 'ios') return toast('On iPhone and iPad, add Handshake to your Home Screen first (Share, then Add to Home Screen), open it from there, and turn notifications on.');
+  const reg = await navigator.serviceWorker.ready;
+  try {
+    if (S.push === 'on') {
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) { await api('POST', '/api/push/unsubscribe', { endpoint: sub.endpoint }); await sub.unsubscribe(); }
+      S.push = 'off'; renderAccount(); return toast('Notifications are off on this device.');
+    }
+    if (await Notification.requestPermission() !== 'granted') return toast('Notifications are blocked for Handshake. Allow them in your browser’s site settings, then try again.');
+    const { key } = await api('GET', '/api/push');
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    await api('POST', '/api/push/subscribe', sub.toJSON());
+    S.push = 'on'; renderAccount();
+    toast('You’ll be notified here when rules are added, agreed to or repealed.');
+  } catch (e) { toast(e.message || 'Couldn’t change notifications. Try again.'); }
 }
 function renderToolbar() {
   const sel = $('#ledgerSel');
@@ -1455,6 +1487,7 @@ async function loadMe() {
   const out = await api('GET', '/api/me');
   S.user = out.user; S.me = out.user.id; S.ledgers = out.ledgers;
   renderAccount();
+  pushState().then(p => { S.push = p; renderAccount(); }).catch(() => {});
 }
 let lastKey = '';
 async function refresh() {
@@ -1509,6 +1542,8 @@ async function leaveInvite() {
 
 async function boot() {
   renderLedger();
+  S.push = 'none';
+  if (pushReady()) navigator.serviceWorker.register('/sw.js').catch(() => {});
   try { await loadMe(); } catch (e) { if (e.code !== 'signed_out') { $('#gate').hidden = false; $('#gate').innerHTML = `<p class="notice">${esc(e.message || 'The ledger couldn’t load. Reload the page to try again.')}</p>`; } return; }
   S.ai = { json: async (prompt, opts = {}) => {
     const out = await api('POST', '/api/check', { prompt }, opts.signal);

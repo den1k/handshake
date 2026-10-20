@@ -57,7 +57,22 @@ mail server: `smtps://user:password@host:465` (TLS) or `smtp://user:password@hos
 (upgraded with STARTTLS; a server that won't encrypt is refused, except on this machine).
 `MAIL_FROM` sets the sender. With neither set, emails are written to `data/outbox/` instead,
 which is fine for trying it out but means nobody receives codes or certificates. Every
-email sent or failed is logged in the database.
+email sent or failed is logged in the database. For Gmail, make an
+[app password](https://myaccount.google.com/apppasswords) and use
+`smtps://you%40gmail.com:apppassword@smtp.gmail.com:465` (the `@` in the address written as `%40`).
+
+## Install it and get notifications
+
+Handshake is an installable web app. In Chrome or Edge, use the install button in the
+address bar; on Android, "Add to Home screen"; on iPhone and iPad, Share › Add to Home Screen.
+Press **Turn on notifications** (next to your name) on each device that should hear when
+a rule in one of your ledgers is added, agreed to, signed or repealed. Whoever does it isn't
+notified. On iPhone and iPad this only works from the Home Screen app (iOS 16.4 or later).
+
+Notifications go through the browsers' own push services (Web Push), so they need no account
+and cost nothing. The server makes its key pair on first run and keeps it in
+`data/vapid.json`; keep that file with the database, since a new key means every device has
+to turn notifications on again. Browsers only allow push on https sites and on localhost.
 
 ## Run it locally
 
@@ -114,7 +129,10 @@ for `localhost`; anything else needs `https`.
   Everything shown on the page is escaped, and a Content Security Policy only lets the
   page's own scripts run.
 - Sessions and invite tokens are stored only as SHA-256 hashes. Session cookies are
-  HttpOnly and SameSite=Lax, and Secure when `BASE_URL` is https.
+  HttpOnly and SameSite=Lax, and Secure when `BASE_URL` is https. Sessions renew whenever
+  they're used, so you're only signed out after 400 days without a visit, or by Sign out.
+- Push messages are encrypted for each device, so the push service can't read them, and the
+  server only sends to the push services of Chrome, Firefox, Safari and Edge.
 - Writes must come from the page itself as JSON; requests from other sites, or for other
   host names, are refused. The page can't be framed by another site.
 - Opening an invite link only shows the invitation; joining takes a click.
@@ -141,4 +159,5 @@ Options (lines in `.env`, or environment variables): `GOOGLE_CLIENT_ID`,
 `AI_URL` (default Groq's chat endpoint), `AI_MODEL` (default `openai/gpt-oss-20b`),
 `AI_API_KEY` (for a non-Groq endpoint), `PORT` (default 4317), `HOST` (default 127.0.0.1),
 `DATA_DIR` (default `./data`), `TRUST_PROXY` (`1` behind a reverse proxy), `RESEND_API_KEY`,
-`SMTP_URL`, `MAIL_FROM` (see Email).
+`SMTP_URL`, `MAIL_FROM` (see Email), `VAPID_SUBJECT` (a `mailto:` or https contact for push
+services; defaults to `BASE_URL` when it's https, else `MAIL_FROM`'s address).

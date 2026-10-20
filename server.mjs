@@ -21,7 +21,8 @@ const DB_FILE = path.join(DATA_DIR, 'handshake.db');
 const GOOGLE_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const REDIRECT_URI = `${BASE_URL}/auth/google/callback`;
-const SESSION_DAYS = 30;
+// Sessions slide: using Handshake renews them, so only this long without a visit signs you out (400 days is browsers' cookie limit).
+const SESSION_DAYS = 400;
 const INVITE_DAYS = 7;
 const ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 const TOKEN_RE = /^[A-Za-z0-9_-]{20,100}$/;
@@ -42,6 +43,11 @@ const SMTP_URL = process.env.SMTP_URL || '';
 const MAIL_FROM = process.env.MAIL_FROM || 'Handshake <handshake@localhost>';
 const MAIL_TRANSPORT = RESEND_KEY ? 'resend' : SMTP_URL ? 'smtp' : 'outbox';
 const CODE_MINUTES = 10;
+// Push notifications go straight to the browsers' own push services (Web Push with VAPID), so they need no account.
+// The server's key pair is made on first run and kept in DATA_DIR/vapid.json.
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || '';
+// Only the push services of the browsers people actually use; anything else would let a client make the server fetch any URL.
+const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/;
 // The notice each person accepts once before signing electronically. Bump the version when the text changes.
 const ESIGN_VERSION = '2026-10-19';
 const ESIGN_NOTICE = 'I agree to use electronic records and electronic signatures for Handshake ledgers marked as legally binding. My electronic signature has the same effect as my handwritten one. I can view, print or save a certificate of anything I sign, and I can ask the other members for a paper copy. I can withdraw this consent by leaving a ledger; that doesn’t undo signatures I’ve already made.';
@@ -95,6 +101,8 @@ sql.exec(`
   -- One-time codes emailed to confirm a signature (stored hashed, short-lived, few attempts).
   CREATE TABLE IF NOT EXISTS signing_codes (user_id TEXT NOT NULL, ledger_id TEXT NOT NULL, purpose TEXT NOT NULL, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, ledger_id, purpose)) STRICT;
   CREATE TABLE IF NOT EXISTS email_log (at TEXT NOT NULL, to_addr TEXT NOT NULL, subject TEXT NOT NULL, transport TEXT NOT NULL, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '') STRICT;
+  -- One row per device that asked for notifications.
+  CREATE TABLE IF NOT EXISTS push_subs (endpoint TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), p256dh TEXT NOT NULL, auth TEXT NOT NULL, created_at TEXT NOT NULL) STRICT;
 `);
 const q = {
   upsertUser: sql.prepare(`INSERT INTO users (id, email, name, picture, created_at) VALUES (?, ?, ?, ?, ?)
@@ -104,6 +112,7 @@ const q = {
   session: sql.prepare('SELECT user_id, expires_at, auth_at FROM sessions WHERE id = ?'),
   dropSession: sql.prepare('DELETE FROM sessions WHERE id = ?'),
   dropExpired: sql.prepare('DELETE FROM sessions WHERE expires_at < ?'),
+  renewSession: sql.prepare('UPDATE sessions SET expires_at = ? WHERE id = ?'),
   addLedger: sql.prepare('INSERT INTO ledgers (id, name, created_by, created_at, binding_since, governing_law) VALUES (?, ?, ?, ?, ?, ?)'),
   ledger: sql.prepare('SELECT id, name, created_by, created_at, binding_since, governing_law, verify_email FROM ledgers WHERE id = ?'),
   setVerify: sql.prepare('UPDATE ledgers SET verify_email = ? WHERE id = ?'),
@@ -150,6 +159,11 @@ const q = {
   agree: sql.prepare('INSERT OR IGNORE INTO entry_agreements (entry_id, user_id, at) VALUES (?, ?, ?)'),
   agreements: sql.prepare(`SELECT a.entry_id, a.user_id, a.at FROM entry_agreements a JOIN entries e ON e.id = a.entry_id
     WHERE e.ledger_id = ? ORDER BY a.at`),
+  addSub: sql.prepare(`INSERT INTO push_subs (endpoint, user_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT (endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth`),
+  subs: sql.prepare('SELECT endpoint, p256dh, auth FROM push_subs WHERE user_id = ?'),
+  dropSub: sql.prepare('DELETE FROM push_subs WHERE endpoint = ?'),
+  dropMySub: sql.prepare('DELETE FROM push_subs WHERE endpoint = ? AND user_id = ?'),
 };
 const now = () => new Date().toISOString();
 const later = days => new Date(Date.now() + days * 864e5).toISOString();
@@ -209,6 +223,13 @@ function currentUser(req) {
   if (!s || s.expires_at < now()) return null;
   const u = q.user.get(s.user_id);
   return u ? Object.assign(u, { authAt: s.auth_at }) : null;
+}
+// At most once a day per session, push its expiry (and the cookie's) back out to the full SESSION_DAYS.
+function renewSession(req, res) {
+  const sid = cookies(req).hs_session, s = sid && q.session.get(digest(sid));
+  if (!s || s.expires_at < now() || s.expires_at > later(SESSION_DAYS - 1)) return;
+  q.renewSession.run(later(SESSION_DAYS), digest(sid));
+  res.setHeader('set-cookie', cookie('hs_session', sid, SESSION_DAYS * 86400));
 }
 
 /* ---------- Google sign-in (authorization code flow with PKCE) ---------- */
@@ -330,6 +351,48 @@ async function sendMail({ to, subject, text, html }) {
   }
 }
 
+/* ---------- push notifications ---------- */
+const VAPID = (() => {
+  const file = path.join(DATA_DIR, 'vapid.json');
+  let jwk;
+  try { jwk = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {
+    jwk = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'jwk' });
+    fs.writeFileSync(file, JSON.stringify(jwk), { mode: 0o600 });
+  }
+  const key = crypto.createPrivateKey({ key: jwk, format: 'jwk' });
+  const pub = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]).toString('base64url');
+  return { key, pub };
+})();
+const b64u = v => Buffer.from(typeof v === 'string' ? v : JSON.stringify(v)).toString('base64url');
+function vapidAuth(endpoint) {
+  const sub = VAPID_SUBJECT || (BASE.protocol === 'https:' ? BASE_URL : 'mailto:' + addrOf(MAIL_FROM));
+  const data = b64u({ typ: 'JWT', alg: 'ES256' }) + '.' + b64u({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub });
+  const sig = crypto.sign('sha256', Buffer.from(data), { key: VAPID.key, dsaEncoding: 'ieee-p1363' }).toString('base64url');
+  return `vapid t=${data}.${sig}, k=${VAPID.pub}`;
+}
+// The message is encrypted for the one device (RFC 8291, aes128gcm), so the push service can't read it.
+function encryptPush(s, payload) {
+  const uaPub = Buffer.from(s.p256dh, 'base64url'), auth = Buffer.from(s.auth, 'base64url');
+  const ecdh = crypto.createECDH('prime256v1'); ecdh.generateKeys();
+  const asPub = ecdh.getPublicKey(), salt = crypto.randomBytes(16);
+  const ikm = Buffer.from(crypto.hkdfSync('sha256', ecdh.computeSecret(uaPub), auth, Buffer.concat([Buffer.from('WebPush: info\0'), uaPub, asPub]), 32));
+  const cek = Buffer.from(crypto.hkdfSync('sha256', ikm, salt, 'Content-Encoding: aes128gcm\0', 16));
+  const nonce = Buffer.from(crypto.hkdfSync('sha256', ikm, salt, 'Content-Encoding: nonce\0', 12));
+  const c = crypto.createCipheriv('aes-128-gcm', cek, nonce);
+  const body = Buffer.concat([c.update(Buffer.concat([Buffer.from(JSON.stringify(payload)), Buffer.from([2])])), c.final(), c.getAuthTag()]);
+  const head = Buffer.alloc(21); salt.copy(head); head.writeUInt32BE(4096, 16); head[20] = asPub.length;
+  return Buffer.concat([head, asPub, body]);
+}
+// Fire-and-forget, like email: a device that's gone (404/410) is forgotten; other failures are only logged.
+function notify(userIds, payload) {
+  for (const uid of new Set(userIds)) for (const s of q.subs.all(uid)) {
+    fetch(s.endpoint, { method: 'POST', body: encryptPush(s, payload), signal: AbortSignal.timeout(15000),
+      headers: { authorization: vapidAuth(s.endpoint), 'content-encoding': 'aes128gcm', 'content-type': 'application/octet-stream', ttl: '86400', urgency: 'normal' } })
+      .then(r => { if (r.status === 404 || r.status === 410) q.dropSub.run(s.endpoint); else if (!r.ok) console.error('[push]', r.status, new URL(s.endpoint).host); })
+      .catch(e => console.error('[push]', e.message));
+  }
+}
+
 /* ---------- limits ---------- */
 // A small in-memory sliding window per key: enough to stop one account from hammering the server or the model.
 const hits = new Map();
@@ -417,6 +480,20 @@ function checkCode(l, me, purpose, code) {
   return null;
 }
 const methodOf = l => l.verify_email ? 'Google sign-in + code emailed to the account address' : 'Google sign-in';
+// Every other member's devices hear when an entry is added or someone agrees to it.
+function notifyLedger(lid, me, eid, agreed) {
+  const l = q.ledger.get(lid), ents = q.entries.all(lid), ent = ents.find(e => e.id === eid), doc = JSON.parse(ent.doc);
+  const label = id => `§ ${entryNumber(lid, id)} · ${JSON.parse(ents.find(e => e.id === id).doc).title || 'Untitled'}`;
+  const targets = (doc.supersedes || []).map(label).join(', '), repeal = doc.kind === 'repeal';
+  let body;
+  if (!agreed) body = repeal ? `${me.name} proposed repealing ${targets}` : `${me.name} added ${label(eid)}${targets ? `, replacing ${targets}` : ''}`;
+  else {
+    const has = new Set(q.agreements.all(lid).filter(a => a.entry_id === eid).map(a => a.user_id));
+    const done = JSON.parse(ent.required).every(u => has.has(u)), signed = !!l.binding_since;
+    body = `${me.name} ${signed ? 'signed' : 'agreed to'} ${repeal ? `${signed ? 'the repeal of' : 'repeal'} ${targets}` : label(eid)}.${done ? ` Everyone has ${signed ? 'signed' : 'agreed'}.` : ''}`;
+  }
+  notify(q.members.all(lid).map(m => m.id).filter(id => id !== me.id), { title: l.name, body, url: `/?l=${encodeURIComponent(lid)}` });
+}
 // When the last required signature lands, everyone gets the certificate by email.
 function mailIfComplete(lid, eid) {
   const ent = q.entry.get(eid);
@@ -520,9 +597,12 @@ const SECURITY = {
 // The page's only scripts are its own two inline ones, allowed by a fresh nonce per response.
 const csp = nonce => [
   "default-src 'self'", `script-src 'nonce-${nonce}'`, "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src https://fonts.gstatic.com", "img-src 'self' data: https://*.googleusercontent.com", "connect-src 'self'",
+  "font-src https://fonts.gstatic.com", "img-src 'self' data: https://*.googleusercontent.com", "connect-src 'self'", "worker-src 'self'",
   "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", "object-src 'none'",
 ].join('; ');
+// The installable app's files, served as they are from public/.
+const STATIC = { '/manifest.webmanifest': 'application/manifest+json', '/sw.js': 'text/javascript; charset=utf-8',
+  '/icon.svg': 'image/svg+xml', '/icon-192.png': 'image/png', '/icon-512.png': 'image/png', '/apple-touch-icon.png': 'image/png' };
 function send(res, status, body) {
   res.writeHead(status, { ...SECURITY, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(body));
@@ -564,12 +644,19 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     const me = currentUser(req);
+    if (me) renewSession(req, res);
 
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       const nonce = token(16);
       res.writeHead(200, { ...SECURITY, 'content-security-policy': csp(nonce), 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         + fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').replaceAll('<script>', `<script nonce="${nonce}">`));
+      return;
+    }
+
+    if (req.method === 'GET' && Object.hasOwn(STATIC, url.pathname)) {
+      res.writeHead(200, { ...SECURITY, 'content-type': STATIC[url.pathname], 'cache-control': 'no-cache' });
+      res.end(fs.readFileSync(path.join(ROOT, 'public', url.pathname.slice(1))));
       return;
     }
 
@@ -605,9 +692,27 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/') && !me) return send(res, 401, { code: 'signed_out', message: 'Sign in first.', signIn: Boolean(GOOGLE_ID && GOOGLE_SECRET) });
 
     if (req.method === 'GET' && url.pathname === '/api/me') return send(res, 200, { user: me, ledgers: q.myLedgers.all(me.id) });
+    if (req.method === 'GET' && url.pathname === '/api/push') return send(res, 200, { key: VAPID.pub });
 
     // Writes and checks are rate-limited per account.
     if (req.method === 'POST' && !allow('w:' + me.id, 120, 60e3)) return send(res, 429, { code: 'rate_limited', message: 'Too many changes at once. Wait a minute and try again.' });
+
+    /* notifications: each device subscribes itself, and can only remove its own subscription */
+    if (req.method === 'POST' && url.pathname === '/api/push/subscribe') {
+      const { endpoint, keys } = await readBody(req);
+      let host = '';
+      try { const u = new URL(endpoint); if (u.protocol === 'https:') host = u.hostname; } catch { /* not a URL */ }
+      const key = (v, n) => typeof v === 'string' && /^[A-Za-z0-9_-]+=*$/.test(v) && Buffer.from(v, 'base64url').length === n;
+      if (!PUSH_HOSTS.test(host) || endpoint.length > 1000 || !isPlainObject(keys) || !key(keys.p256dh, 65) || !key(keys.auth, 16))
+        return send(res, 400, { code: 'invalid_argument', message: 'This browser’s push service isn’t supported.' });
+      q.addSub.run(endpoint, me.id, keys.p256dh, keys.auth, now());
+      return send(res, 200, { ok: true });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/push/unsubscribe') {
+      const { endpoint } = await readBody(req);
+      q.dropMySub.run(String(endpoint), me.id);
+      return send(res, 200, { ok: true });
+    }
 
     if (parts[0] === 'api' && parts[1] === 'invites' && parts.length >= 3) {
       if (!TOKEN_RE.test(parts[2])) return send(res, 404, { code: 'not_found', message: 'This invite link isn’t valid. Ask for a new one.' });
@@ -751,6 +856,7 @@ const server = http.createServer(async (req, res) => {
           if (signer) q.addEntrySig.run(id, me.id, at, signer, entryStatement(l, entryNumber(lid, id), hash), hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || '');
         });
         if (signer) mailIfComplete(lid, id);
+        notifyLedger(lid, me, id, false);
         return send(res, 201, { ok: true });
       }
 
@@ -759,7 +865,10 @@ const server = http.createServer(async (req, res) => {
         if (!e || e.ledger_id !== lid) return send(res, 404, { code: 'not_found', message: 'No such entry.' });
         if (!JSON.parse(e.required).includes(me.id)) return send(res, 403, { code: 'forbidden', message: 'You weren’t a member when this entry was written, so it doesn’t need your agreement.' });
         const l = q.ledger.get(lid);
-        if (!l.binding_since) { q.agree.run(parts[4], me.id, now()); return send(res, 200, { ok: true }); }
+        if (!l.binding_since) {
+          if (q.agree.run(parts[4], me.id, now()).changes) notifyLedger(lid, me, parts[4], true);
+          return send(res, 200, { ok: true });
+        }
         // Binding: a signature over the exact text the signer was shown.
         const block = bindingBlock(lid, me);
         if (block) return send(res, 403, block);
@@ -771,8 +880,9 @@ const server = http.createServer(async (req, res) => {
         const bad = checkCode(l, me, 'entry:' + parts[4], body.code);
         if (bad) return send(res, 403, bad);
         const at = now();
-        tx(() => { q.agree.run(parts[4], me.id, at); q.addEntrySig.run(parts[4], me.id, at, name, entryStatement(l, h.seq, h.hash), h.hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || ''); });
+        const added = tx(() => { const c = q.agree.run(parts[4], me.id, at).changes; q.addEntrySig.run(parts[4], me.id, at, name, entryStatement(l, h.seq, h.hash), h.hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || ''); return c; });
         mailIfComplete(lid, parts[4]);
+        if (added) notifyLedger(lid, me, parts[4], true);
         return send(res, 200, { ok: true });
       }
     }
@@ -807,5 +917,6 @@ server.listen(PORT, HOST, () => {
   console.log(`Database: ${DB_FILE}`);
   console.log(GOOGLE_ID && GOOGLE_SECRET ? `Google sign-in on; redirect URI: ${REDIRECT_URI}` : 'Google sign-in is off until GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set.');
   console.log(AI_KEY || !AI_URL.includes('groq.com') ? `Rule checks: ${AI_MODEL} at ${new URL(AI_URL).host}` : 'Rule checks are off until GROQ_API_KEY is set.');
+  console.log(BASE.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(BASE.hostname) ? 'Notifications: on (Web Push)' : 'Notifications: off until BASE_URL is https:// (browsers only allow push on secure sites).');
   console.log(MAIL_TRANSPORT === 'outbox' ? `Email: not configured; messages are saved to ${path.join(DATA_DIR, 'outbox')}` : `Email: ${MAIL_TRANSPORT}, from ${MAIL_FROM}`);
 });
