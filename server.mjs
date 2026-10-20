@@ -575,11 +575,11 @@ function certificateHtml(lid, eid) {
       <h2>Agreement signatures</h2>${members.map(m => { const s = sigs.find(x => x.user_id === m.id); return s ? `<section><p>Signed covering the first ${s.entry_count} entr${s.entry_count === 1 ? 'y' : 'ies'} (fingerprint <code>${e(s.head_hash)}</code>).</p>${audit(s)}<ul>${consentRows(m.id)}</ul></section>` : `<section><p><strong>${e(m.name)}</strong> hasn’t signed the agreement.</p></section>`; }).join('')}`;
   }
   return { html: `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Certificate · ${e(title)}</title>
-<style>body{margin:0;background:#f6f2ec;color:#2b2622;font:15px/1.55 Georgia,serif;padding:32px 16px}main{max-width:46rem;margin:0 auto;background:#fffdf9;border:1px solid #958879;border-radius:16px;padding:32px 36px}
-h1{font-weight:500;font-size:28px;margin:0 0 4px}h2{font-size:15px;letter-spacing:.08em;text-transform:uppercase;margin:28px 0 8px;font-family:system-ui,sans-serif}.k{color:#6b625a;font:13px system-ui,sans-serif}
-dl{display:grid;grid-template-columns:10rem 1fr;gap:4px 16px;margin:8px 0}dt{color:#6b625a;font:13px system-ui,sans-serif}dd{margin:0;overflow-wrap:anywhere}code{font-size:12px}blockquote{margin:0;padding:12px 16px;border-left:3px double #ddd2c3;white-space:pre-wrap}
-section{border-top:1px solid #e8dfd2;padding-top:12px;margin-top:12px}ul{font:13px system-ui,sans-serif;color:#4a423b;padding-left:18px}.state{font:600 14px system-ui,sans-serif}.ok{color:#4f6f5f}.wait{color:#7a4e1d}
-.integrity{font:13px system-ui,sans-serif;margin-top:28px;padding:10px 12px;border-radius:10px;background:${v.ok ? '#eef3ef' : '#fbeae4'}}@media print{body{background:#fff;padding:0}main{border:0}}</style>
+<style>body{margin:0;background:#e8e6e0;color:#000;font:15px/1.55 'Helvetica Neue',Helvetica,Arial,sans-serif;padding:32px 16px}main{max-width:46rem;margin:0 auto;background:#fff;border:1px solid #d6d3cb;border-radius:8px;padding:32px 36px}
+h1{font-weight:700;font-size:28px;letter-spacing:-.02em;margin:0 0 4px}h2{font-size:17px;margin:28px 0 8px}.k{color:#53565a;font-size:13px}
+dl{display:grid;grid-template-columns:10rem 1fr;gap:4px 16px;margin:8px 0}dt{color:#53565a;font-size:13px}dd{margin:0;overflow-wrap:anywhere}code{font-size:12px}blockquote{margin:0;padding:12px 16px;border-left:4px solid #000;white-space:pre-wrap}
+section{border-top:1px solid #e3e3e0;padding-top:12px;margin-top:12px}ul{font-size:13px;color:#3a3c3f;padding-left:18px}.state{font-weight:700;font-size:14px}.ok{color:#007a4f}.wait{color:#9a4f00}
+.integrity{font-size:13px;margin-top:28px;padding:10px 12px;border-radius:6px;background:${v.ok ? '#eaf5ef' : '#fbdde3'}}@media print{body{background:#fff;padding:0}main{border:0}}</style>
 <main><p class="k">Handshake · certificate · generated ${when(now())}</p><h1>${e(title)}</h1>${body}
 <p class="integrity">${v.ok ? `Integrity check passed: all ${v.count} fingerprints in this agreement match their recorded content and order.` : `Integrity check FAILED at entry ${v.brokenAt}: the stored history doesn’t match its fingerprints.`}</p>
 <p class="k">Print this page or save it as a PDF to keep a copy.</p></main>` };
@@ -611,8 +611,8 @@ const escHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&
 function page(res, status, title, text) {
   res.writeHead(status, { ...SECURITY, 'content-security-policy': csp(token(12)), 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
   res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escHtml(title)} · Handshake</title>
-<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f2ec;color:#2b2622;font:16px/1.5 system-ui,sans-serif;padding:24px;box-sizing:border-box">
-<main style="max-width:28rem;background:#fffdf9;border:1px solid #958879;border-radius:18px;padding:28px 32px"><h1 style="margin:0 0 8px;font:500 26px Georgia,serif">${escHtml(title)}</h1><p style="margin:0 0 16px">${escHtml(text)}</p><a href="/" style="color:#2b2622">Back to Handshake</a></main></body>`);
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#e8e6e0;color:#000;font:16px/1.5 'Helvetica Neue',Helvetica,Arial,sans-serif;padding:24px;box-sizing:border-box">
+<main style="max-width:28rem;background:#fff;border:1px solid #d6d3cb;border-radius:8px;padding:28px 32px"><h1 style="margin:0 0 8px;font:700 26px 'Helvetica Neue',Helvetica,Arial,sans-serif;letter-spacing:-.02em">${escHtml(title)}</h1><p style="margin:0 0 16px">${escHtml(text)}</p><a href="/" style="color:#000;font-weight:700">Back to Handshake</a></main></body>`);
 }
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -699,7 +699,7 @@ const server = http.createServer(async (req, res) => {
 <meta property="og:description" content="${e(desc)}"><meta property="og:url" content="${e(BASE_URL + url.pathname)}"><meta property="og:image" content="${e(BASE_URL)}/og.png">
 <meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image">
 <meta name="description" content="${e(desc)}"><meta http-equiv="refresh" content="0; url=${e(next)}">
-<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f2ec;color:#2b2622;font:16px/1.5 system-ui,sans-serif"><a href="${e(next)}" style="color:#2b2622">Continue to Handshake</a></body>`);
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#e8e6e0;color:#000;font:16px/1.5 'Helvetica Neue',Helvetica,Arial,sans-serif"><a href="${e(next)}" style="color:#000;font-weight:700">Continue to Handshake</a></body>`);
       return;
     }
 
@@ -857,9 +857,9 @@ const server = http.createServer(async (req, res) => {
         q.addInvite.run(digest(t), lid, me.id, now(), exp);
         const sent = await sendMail({ to: [email], subject: `${me.name} invited you to “${l.name}” on Handshake`,
           text: `${me.name} (${me.email}) invited you to join the agreement “${l.name}” on Handshake, where you agree on rules together.\n\nJoin here: ${url}\n\nThe link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, ignore this email.`,
-          html: `<div style="font:16px/1.5 Georgia,serif;color:#2b2622;max-width:32rem"><p>${escHtml(me.name)} (${escHtml(me.email)}) invited you to join the agreement <b>“${escHtml(l.name)}”</b> on Handshake, where you agree on rules together.</p>
-<p><a href="${escHtml(url)}" style="display:inline-block;background:#2b2622;color:#fffdf9;padding:10px 18px;border-radius:999px;text-decoration:none;font-family:system-ui,sans-serif">Join “${escHtml(l.name)}”</a></p>
-<p style="color:#6b6158;font-size:14px">The link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, ignore this email.</p></div>` });
+          html: `<div style="font:16px/1.5 'Helvetica Neue',Helvetica,Arial,sans-serif;color:#000;max-width:32rem"><p>${escHtml(me.name)} (${escHtml(me.email)}) invited you to join the agreement <b>“${escHtml(l.name)}”</b> on Handshake, where you agree on rules together.</p>
+<p><a href="${escHtml(url)}" style="display:inline-block;background:#000;color:#fff;padding:11px 20px;border-radius:6px;text-decoration:none;font-weight:700">Join “${escHtml(l.name)}”</a></p>
+<p style="color:#53565a;font-size:14px">The link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, ignore this email.</p></div>` });
         if (!sent) return send(res, 502, { code: 'mail_failed', message: 'The invite email couldn’t be sent. Copy the link instead.' });
         return send(res, 201, { ok: true, to: email });
       }
