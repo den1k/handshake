@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- The link-preview image, public/og.png. Render it at 1200×630, e.g. with Playwright: open this file, screenshot the viewport. -->
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,500,50&family=Figtree:wght@500;600&display=swap">
+<style>
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body { background: #f6f2ec; display: grid; place-items: center; font-family: Figtree, sans-serif; color: #2b2622; }
+  .page { width: 1104px; height: 534px; box-sizing: border-box; background: #fffdf9; border: 2px solid #ddd2c3; border-radius: 34px;
+    outline: 2px solid #ddd2c3; outline-offset: 10px; display: flex; flex-direction: column; justify-content: center; padding: 0 92px; position: relative; }
+  .brand { display: flex; align-items: center; gap: 34px; }
+  .brand svg { width: 150px; height: 96px; flex: none; }
+  h1 { margin: 0; font: 500 132px/1 Fraunces, serif; font-variation-settings: "SOFT" 50; letter-spacing: -.02em; }
+  .tag { margin: 34px 0 0 4px; font: 600 26px Figtree, sans-serif; letter-spacing: .32em; text-transform: uppercase; color: #6b625a; }
+  .tag b { color: #4f6f5f; font-weight: 600; padding: 0 .35em; }
+  p { margin: 30px 0 0 4px; font-size: 34px; line-height: 1.35; color: #4a423b; max-width: 34ch; }
+  .chain { position: absolute; left: 92px; right: 92px; bottom: 54px; height: 14px;
+    background: radial-gradient(circle at 7px 7px, transparent 4px, #d4c7b5 4.5px, #d4c7b5 6px, transparent 6.5px) 0 0 / 18px 14px repeat-x; }
+</style>
+<div class="page">
+  <div class="brand">
+    <svg viewBox="80 150 352 212" aria-hidden="true"><g fill="none" stroke="#4f6f5f" stroke-width="15"><circle cx="191" cy="256" r="84"/><circle cx="321" cy="256" r="84"/></g></svg>
+    <h1>Handshake</h1>
+  </div>
+  <div class="tag">Agreed<b>·</b>Recorded<b>·</b>Never erased</div>
+  <p>Ledgers of the rules and agreements between partners, housemates, family and friends.</p>
+  <div class="chain"></div>
+</div>

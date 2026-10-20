@@ -4,7 +4,7 @@ Ledgers of the rules and agreements made between two or more people: partners,
 housemates, family, friends, business partners.
 
 - Sign in with Google. Create a ledger for each group and invite the others with a
-  one-time link. Only a ledger's members can see it.
+  one-time link, or have Handshake email one to them. Only a ledger's members can see it.
 - Write a rule and press **Check rule**: a fast model finds the rules in force it touches
   (the ledger narrows to them, with conflicting words marked) and suggests edge cases.
   Tick the edge cases you want in the rule, decide whether a conflicting rule is

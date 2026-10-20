@@ -602,7 +602,7 @@ const csp = nonce => [
 ].join('; ');
 // The installable app's files, served as they are from public/.
 const STATIC = { '/manifest.webmanifest': 'application/manifest+json', '/sw.js': 'text/javascript; charset=utf-8',
-  '/icon.svg': 'image/svg+xml', '/icon-192.png': 'image/png', '/icon-512.png': 'image/png', '/apple-touch-icon.png': 'image/png' };
+  '/icon.svg': 'image/svg+xml', '/icon-192.png': 'image/png', '/icon-512.png': 'image/png', '/apple-touch-icon.png': 'image/png', '/og.png': 'image/png' };
 function send(res, status, body) {
   res.writeHead(status, { ...SECURITY, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(body));
@@ -650,7 +650,7 @@ const server = http.createServer(async (req, res) => {
       const nonce = token(16);
       res.writeHead(200, { ...SECURITY, 'content-security-policy': csp(nonce), 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        + fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').replaceAll('<script>', `<script nonce="${nonce}">`));
+        + fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').replaceAll('<script>', `<script nonce="${nonce}">`).replaceAll('%BASE_URL%', escHtml(BASE_URL)));
       return;
     }
 
@@ -674,10 +674,26 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    /* invites: /invite/<token> opens the page, which asks before joining (a visit alone never joins) */
+    /* invites: /invite/<token> opens the page, which asks before joining (a visit alone never joins).
+       Signed out (as link-preview bots always are), it answers with a page whose preview tags name the
+       invitation, then moves on to sign-in. */
     if (req.method === 'GET' && parts[0] === 'invite' && parts.length === 2) {
       const dest = '/?invite=' + encodeURIComponent(parts[1]);
-      res.writeHead(302, { ...SECURITY, location: me ? dest : '/auth/google?next=' + encodeURIComponent(dest), 'cache-control': 'no-store' }); res.end(); return;
+      if (me) { res.writeHead(302, { ...SECURITY, location: dest, 'cache-control': 'no-store' }); res.end(); return; }
+      const inv = TOKEN_RE.test(parts[1]) ? q.invite.get(digest(parts[1])) : null;
+      const open = inv && !inv.used_by && inv.expires_at >= now(), next = '/auth/google?next=' + encodeURIComponent(dest);
+      const title = open ? `${inv.inviter} invited you to “${inv.ledger_name}”` : 'An invitation to Handshake';
+      const desc = open ? 'Join this ledger on Handshake to agree on its rules together. The link works once.'
+        : 'Ledgers of the rules and agreements between partners, housemates, family and friends.';
+      const e = escHtml;
+      res.writeHead(200, { ...SECURITY, 'content-security-policy': csp(token(12)), 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' });
+      res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · Handshake</title>
+<meta property="og:type" content="website"><meta property="og:site_name" content="Handshake"><meta property="og:title" content="${e(title)}">
+<meta property="og:description" content="${e(desc)}"><meta property="og:url" content="${e(BASE_URL + url.pathname)}"><meta property="og:image" content="${e(BASE_URL)}/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image">
+<meta name="description" content="${e(desc)}"><meta http-equiv="refresh" content="0; url=${e(next)}">
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f2ec;color:#2b2622;font:16px/1.5 system-ui,sans-serif"><a href="${e(next)}" style="color:#2b2622">Continue to Handshake</a></body>`);
+      return;
     }
 
     /* certificates: printable records of a binding ledger or one entry, for its members */
@@ -823,6 +839,22 @@ const server = http.createServer(async (req, res) => {
         const t = token(), exp = later(INVITE_DAYS);
         q.addInvite.run(digest(t), lid, me.id, now(), exp);
         return send(res, 201, { url: `${BASE_URL}/invite/${t}`, expiresAt: exp });
+      }
+      // The same one-time link, made fresh and emailed to one address.
+      if (req.method === 'POST' && parts[3] === 'invites' && parts[4] === 'email' && parts.length === 5) {
+        const email = String((await readBody(req)).email || '').trim();
+        if (email.length > 254 || !/^[^\s@<>,;:"()\[\]\\]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(email))
+          return send(res, 400, { code: 'invalid_argument', message: 'That doesn’t look like an email address.' });
+        if (!allow('i:' + me.id, 30, 3600e3)) return send(res, 429, { code: 'rate_limited', message: 'That’s a lot of invites. Try again later.' });
+        const l = q.ledger.get(lid), t = token(), exp = later(INVITE_DAYS), url = `${BASE_URL}/invite/${t}`;
+        q.addInvite.run(digest(t), lid, me.id, now(), exp);
+        const sent = await sendMail({ to: [email], subject: `${me.name} invited you to “${l.name}” on Handshake`,
+          text: `${me.name} (${me.email}) invited you to join the ledger “${l.name}” on Handshake, where you agree on rules together.\n\nJoin here: ${url}\n\nThe link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, ignore this email.`,
+          html: `<div style="font:16px/1.5 Georgia,serif;color:#2b2622;max-width:32rem"><p>${escHtml(me.name)} (${escHtml(me.email)}) invited you to join the ledger <b>“${escHtml(l.name)}”</b> on Handshake, where you agree on rules together.</p>
+<p><a href="${escHtml(url)}" style="display:inline-block;background:#2b2622;color:#fffdf9;padding:10px 18px;border-radius:999px;text-decoration:none;font-family:system-ui,sans-serif">Join “${escHtml(l.name)}”</a></p>
+<p style="color:#6b6158;font-size:14px">The link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, ignore this email.</p></div>` });
+        if (!sent) return send(res, 502, { code: 'mail_failed', message: 'The invite email couldn’t be sent. Copy the link instead.' });
+        return send(res, 201, { ok: true, to: email });
       }
 
       // A new entry: the author and time come from the session, and it needs every current member's agreement.

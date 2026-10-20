@@ -3,6 +3,17 @@
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#f6f2ec">
+<meta name="description" content="Ledgers of the rules and agreements between partners, housemates, family and friends. Agreed by everyone, recorded, never erased.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Handshake">
+<meta property="og:title" content="Handshake">
+<meta property="og:description" content="Ledgers of the rules and agreements between partners, housemates, family and friends. Agreed by everyone, recorded, never erased.">
+<meta property="og:url" content="%BASE_URL%/">
+<meta property="og:image" content="%BASE_URL%/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Handshake: agreed, recorded, never erased">
+<meta name="twitter:card" content="summary_large_image">
 <script>try {
   /* One-time move from the keys used before the renames (Rule Ledger, then Pact). */
   for (const old of ['pact.', 'rule-ledger.']) for (const k of ['draft.v1', 'me', 'theme']) {
@@ -123,7 +134,7 @@ code { font-size: .9em; }
 .panel { padding: 1rem 1.5rem 1.2rem; border-bottom: 1px solid var(--grid); background: var(--accent-soft); display: grid; gap: .7rem; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; }
 .panel h3 { margin: 0; font: 600 1.05rem var(--f-text); }
-.panel input[type="text"] { max-width: 34rem; }
+.panel input[type="text"], .panel input[type="email"] { max-width: 34rem; }
 /* Legally binding ledgers: status bar, settings and signing views, signature fields */
 .bindbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .7rem 1.5rem; border-bottom: 1px solid var(--rule); background: var(--accent-soft); font-size: .9rem; }
 .bindbar.todo { background: var(--blank); }
@@ -324,7 +335,7 @@ code { font-size: .9em; }
 .row { display: flex; flex-wrap: wrap; gap: .6rem 1.25rem; align-items: center; }
 .field { display: grid; gap: .4rem; }
 .lbl { font: 600 .95rem/1.2 var(--f-text); font-variant-caps: all-small-caps; letter-spacing: .08em; color: var(--ink); }
-textarea, input[type="text"], select { font: .95rem/1.45 var(--f-ui); color: var(--ink); background: var(--field); border: 1px solid var(--edge); border-radius: 12px; padding: .7rem .85rem; width: 100%; }
+textarea, input[type="text"], input[type="email"], select { font: .95rem/1.45 var(--f-ui); color: var(--ink); background: var(--field); border: 1px solid var(--edge); border-radius: 12px; padding: .7rem .85rem; width: 100%; }
 textarea { resize: vertical; }
 textarea.prose { font: 1.06rem/1.55 var(--f-text); }
 textarea::placeholder, input::placeholder { color: var(--muted); }
@@ -1184,6 +1195,7 @@ document.addEventListener('click', e => {
     case 'save-verify': saveVerify(); break;
     case 'leave': leaveLedger(); break;
     case 'invite': invite(); break;
+    case 'email-invite': emailInvite(); break;
     case 'copy-invite': { const i = $('#invite-url'); if (i) { i.select(); navigator.clipboard && navigator.clipboard.writeText(i.value).then(() => toast('Invite link copied.'), () => {}); } break; }
     case 'close-panel': showPanel(null); break;
     case 'sign-out': signOut(); break;
@@ -1225,6 +1237,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'Escape' && S.focus && !drafting()) { S.focus = null; renderLedger(); }
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && e.target.id === 'd-text') check();
   if (e.key === 'Enter' && e.target.id === 'ledger-name') createLedger();
+  if (e.key === 'Enter' && e.target.id === 'invite-email') emailInvite();
 });
 
 $('#ledger').addEventListener('toggle', e => {
@@ -1298,6 +1311,8 @@ function showPanel(kind, data) {
     p.innerHTML = `<div class="panel-head"><h3>Invite someone to ${esc(S.ledger.name)}</h3><button type="button" class="btn link" data-act="close-panel">Done</button></div>
       <p class="hint">Send this link to one person. It works once, for ${esc(data.days)} days. They sign in with Google and join this ledger.</p>
       <div class="row"><input type="text" id="invite-url" readonly value="${esc(data.url)}" aria-label="Invite link"><button type="button" class="btn" data-act="copy-invite">Copy link</button></div>
+      <p class="hint">Or email an invite. They get a link of their own, so this one stays free for someone else.</p>
+      <div class="row"><input type="email" id="invite-email" placeholder="Their email address" autocomplete="off" aria-label="Email address to invite"><button type="button" class="btn" data-act="email-invite">Send invite</button></div>
       <p class="hint">Rules written after they join need their agreement too. Rules already written don’t.</p>`;
     const i = $('#invite-url'); if (i) i.select();
   }
@@ -1461,6 +1476,18 @@ async function createLedger() {
     await openLedger(id);
     toast(bind ? `“${name}” is ready and legally binding. Sign it, then invite the others.` : `“${name}” is ready. Invite the others when you like.`);
   } catch (e) { toast(e.message || 'Couldn’t create the ledger.'); }
+}
+async function emailInvite() {
+  const i = $('#invite-email'), b = $('[data-act="email-invite"]');
+  if (!i || b.disabled) return;
+  const email = i.value.trim();
+  if (!email) return i.focus();
+  b.disabled = true;
+  try {
+    const { to } = await api('POST', `/api/ledgers/${S.ledger.id}/invites/email`, { email });
+    i.value = ''; toast(`Invite sent to ${to}.`);
+  } catch (e) { toast(e.message || 'Couldn’t send the invite.'); }
+  finally { b.disabled = false; i.focus(); }
 }
 async function invite() {
   if (!S.ledger) return;
