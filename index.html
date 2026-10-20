@@ -126,10 +126,18 @@ code { font-size: .9em; }
 .gate p { margin: 0; max-width: 34rem; color: var(--ink-2); }
 .gate .row { justify-content: center; }
 .gate input[type="text"] { width: 18rem; }
-.ledger-cell { gap: .5rem; padding-right: 20px; border-right: 1px solid #333; }
-.ledger-cell label { font-size: .9rem; color: var(--on-sign-2); }
-#ledgerSel { width: auto; max-width: 16rem; padding: .45rem .7rem; font-weight: 600; }
-.members-cell { gap: .6rem; }
+/* Your agreements: a list beside the page, each with a stripe per member in their line colour */
+.shell { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.shell > .app-in { flex: 999 1 640px; min-width: 0; }
+.side { flex: 1 1 200px; max-width: 240px; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
+.side p { margin: 0 12px 8px; font-size: .86rem; color: var(--muted); }
+.side-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: 0; border-radius: 6px; background: none; color: var(--ink); font: 700 .95rem/1.3 var(--f-ui); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.side-item:hover { background: var(--accent-tint); }
+.side-item[aria-current="page"] { background: var(--page); box-shadow: 0 0 0 1px var(--rule); }
+.side-item.new { margin-top: 6px; color: var(--muted); }
+.side-item.new:hover { color: var(--ink); }
+.stripes { display: flex; gap: 3px; flex: none; }
+.stripes i { display: block; width: 5px; height: 20px; }
 /* Members as a map legend: each name beside a short stroke of their line colour */
 .members { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; font-size: .9rem; font-weight: 700; color: var(--on-sign); }
 .members .who { display: inline-flex; align-items: center; gap: .45rem; }
@@ -170,27 +178,20 @@ code { font-size: .9em; }
 .gate .new-ledger { margin: 0 auto; }
 .new-ledger .law { width: 100%; display: none; }
 .new-ledger:has(#ledger-binding:checked) .law { display: grid; }
-.settings-cell { gap: .5rem; }
 .code-row input { width: 9rem; letter-spacing: .2em; font-variant-numeric: tabular-nums; }
 /* Toolbar */
-.toolbar { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 26px 24px 18px; background: var(--sign); color: var(--on-sign); }
+.toolbar { position: relative; display: grid; gap: 16px; padding: 30px 28px 22px; background: var(--sign); color: var(--on-sign); }
+.sign-row { display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: center; justify-content: space-between; }
+.sign-name { margin: 0; font: 700 2.6rem/1.05 var(--f-display); letter-spacing: -.02em; overflow-wrap: anywhere; }
+.sign-actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
 .toolbar::before { content: ""; position: absolute; left: 0; right: 0; top: 9px; height: 3px; background: var(--on-sign); }
 .toolbar .btn { background: transparent; color: var(--on-sign); border-color: var(--on-sign); }
 .toolbar .btn:hover:not(:disabled) { background: #262626; }
 .toolbar .btn.primary { background: var(--on-sign); color: #000; border-color: var(--on-sign); }
 .toolbar .btn.primary:hover:not(:disabled) { background: #fdd200; filter: none; }
 .toolbar .btn.primary .rings { color: #000; }
-.toolbar select, .toolbar #q { background: #fff; color: #000; border-color: #fff; }
-.toolbar #q::placeholder { color: #53565a; }
-.toolbar .seg { border-color: var(--on-sign); background: transparent; }
-.toolbar .seg button { color: var(--on-sign); }
-.toolbar .seg button + button { border-left-color: var(--on-sign); }
-.toolbar .seg button:hover { background: #262626; }
-.toolbar .seg button[aria-pressed="true"] { background: var(--on-sign); color: #000; }
-.toolbar > * { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
-.toolbar .tools { flex: 1; }
-.toolbar .new-cell { margin-left: auto; }
-.toolbar .new-cell:has(> [hidden]) { display: none; }
+/* Filters and search, in a light bar under the sign */
+.tools { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: center; padding: 12px 24px; border-bottom: 1px solid var(--grid); background: var(--accent-soft); }
 
 
 /* Buttons */
@@ -428,11 +429,14 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--accent); ou
   .mast { padding: 12px 16px; }
   .mast h1 { font-size: 22px; }
   .account span { display: none; }
-  .ledger-cell { border-right: 0; padding-right: 0; flex-basis: 100%; }
-  .members-cell { flex-basis: 100%; }
+  .shell { gap: 0; }
+  .side { flex-basis: 100%; max-width: none; flex-direction: row; overflow-x: auto; padding: 0 12px 10px; gap: 4px; }
+  .side p { display: none; }
+  .side-item { width: auto; flex: none; white-space: nowrap; }
   .theme { margin-left: auto; }
-  .toolbar { padding: 12px 16px; }
-  .toolbar .tools, .toolbar .new-cell { flex-basis: 100%; }
+  .toolbar { padding: 26px 16px 18px; }
+  .sign-name { font-size: 2rem; }
+  .tools { padding: 12px 16px; }
   #q { width: 100%; }
   .lhead { display: flex; }
   .lhead > span, .lhead .sort:first-child { display: none; }
@@ -465,19 +469,24 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--accent); ou
       <button type="button" data-act="theme" data-t="dark" aria-pressed="false" aria-label="Dark" title="Dark"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 9.6A5.5 5.5 0 1 1 6.4 3a4.4 4.4 0 0 0 6.6 6.6z"/></svg></button>
     </div>
   </header>
+  <div class="shell">
+  <nav id="side" class="side" aria-label="Your agreements" hidden></nav>
   <div class="app-in">
 
   <section id="gate" class="gate" hidden></section>
 
   <div id="toolbar" class="toolbar" hidden>
-    <div class="ledger-cell">
-      <label for="ledgerSel" class="sc">Agreement</label>
-      <select id="ledgerSel" aria-label="Ledger"></select>
-      <button type="button" class="btn small" data-act="new-ledger">New agreement</button>
+    <div class="sign-row">
+      <h2 id="ledgerName" class="sign-name"></h2>
+      <div class="sign-actions">
+        <button type="button" class="btn small" data-act="invite">Invite</button>
+        <button type="button" class="btn small" data-act="settings" id="settingsBtn">Settings</button>
+        <button id="newBtn" class="btn primary" data-act="new" hidden>New entry</button>
+      </div>
     </div>
-    <div id="membersCell" class="members-cell"></div>
-    <div class="settings-cell"><button type="button" class="btn small" data-act="settings" id="settingsBtn">Settings</button></div>
-    <div id="tools" class="tools" hidden>
+    <div id="membersCell"></div>
+  </div>
+  <div id="tools" class="tools" hidden>
       <div class="seg" role="group" aria-label="Show entries">
         <button type="button" data-act="filter" data-f="all" aria-pressed="true">All</button>
         <button type="button" data-act="filter" data-f="pending" aria-pressed="false">Awaiting agreement</button>
@@ -485,8 +494,6 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--accent); ou
         <button type="button" data-act="filter" data-f="past" aria-pressed="false">Replaced</button>
       </div>
       <input id="q" type="search" placeholder="Search rules" aria-label="Search rules">
-    </div>
-    <div class="new-cell"><button id="newBtn" class="btn primary" data-act="new" hidden>New entry</button></div>
   </div>
   <div id="panel" class="panel" hidden></div>
   <div id="bindbar" class="bindbar" role="status" hidden></div>
@@ -508,6 +515,7 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--accent); ou
     <div id="next"></div>
     <footer id="lfoot" class="lfoot"></footer>
   </main>
+  </div>
   </div>
 </div>
 
@@ -1229,6 +1237,7 @@ document.addEventListener('click', e => {
     }
     case 'repeal': openComposer({ mode: 'repeal', supersedes: [id] }); break;
     case 'new-ledger': showPanel('new-ledger'); break;
+    case 'open-ledger': openLedger(b.dataset.id); break;
     case 'create-ledger': createLedger(); break;
     case 'settings': if (drafting()) closeComposer(); setView('settings'); break;
     case 'back': setView('ledger'); break;
@@ -1275,7 +1284,6 @@ document.addEventListener('input', e => {
 
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.id === 'ledgerSel') { if (t.value === '__new') { t.value = S.ledger ? S.ledger.id : ''; showPanel('new-ledger'); } else openLedger(t.value); return; }
   if (t.matches('input[data-edge]')) toggleEdge(+t.dataset.edge, t.checked);
 });
 
@@ -1319,6 +1327,7 @@ function showGate(kind) {
   const g = $('#gate');
   const show = !!kind;
   g.hidden = !show; $('#toolbar').hidden = show; $('#ledger').hidden = show; $('#panel').hidden = true;
+  if (show) $('#tools').hidden = true;
   if (!show) return;
   if (kind === 'signed-out') {
     $('#account').hidden = true;
@@ -1504,11 +1513,15 @@ function autoNotify() {
   ask().then(() => { if (Notification.permission !== 'default') document.removeEventListener('click', onClick, { capture: true }); });
 }
 function renderToolbar() {
-  const sel = $('#ledgerSel');
-  sel.innerHTML = S.ledgers.map(l => `<option value="${esc(l.id)}"${S.ledger && l.id === S.ledger.id ? ' selected' : ''}>${esc(l.name)}</option>`).join('') + '<option value="__new">New agreement…</option>';
+  // Members take line colours in the order they joined, so the first n colours are an agreement's stripes.
+  const side = $('#side');
+  side.hidden = !S.ledgers.length;
+  side.innerHTML = `<p>Your agreements</p>${S.ledgers.map(l => `<button type="button" class="side-item" data-act="open-ledger" data-id="${esc(l.id)}"${S.ledger && l.id === S.ledger.id ? ' aria-current="page"' : ''}>
+    <span class="stripes" aria-hidden="true">${LINE_COLORS.slice(0, Math.max(1, Math.min(l.members || 1, 6))).map(c => `<i style="background:${c}"></i>`).join('')}</span>${esc(l.name)}</button>`).join('')}
+    <button type="button" class="side-item new" data-act="new-ledger">+ New agreement</button>`;
+  $('#ledgerName').textContent = S.ledger ? S.ledger.name : '';
   $('#membersCell').innerHTML = S.ledger ? `<span class="members" title="${esc(S.members.map(m => m.name + ' · ' + m.email).join('\n'))}">${S.members.map(m =>
-    `<span class="who"><i style="--c:${lineColor(m.id)}"></i>${esc(firstName(m.id))}</span>`).join('')}</span>
-    <button type="button" class="btn small" data-act="invite">Invite</button>` : '';
+    `<span class="who"><i style="--c:${lineColor(m.id)}"></i>${esc(firstName(m.id))}</span>`).join('')}</span>` : '';
 }
 
 async function createLedger() {

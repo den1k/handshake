@@ -85,7 +85,25 @@ h2 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
 .strip li:last-child::after { display: none; }
 .strip b { display: block; font-size: 18px; }
 .strip span { display: block; font-size: 16px; color: var(--ink-2); margin-top: 3px; line-height: 1.4; }
-.tag { display: inline; color: #000; font-size: 13px; font-weight: 700; background: var(--yellow); padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+.tag { display: inline-block; vertical-align: 3px; margin-left: 6px; color: #000; font-size: 12px; font-weight: 700; letter-spacing: 0; background: var(--yellow); padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+
+/* Against a signed PDF: three rows, the PDF's way greyed, Handshake's in ink */
+.vs h2 { margin-bottom: 10px; }
+.vs-lede { margin: 0 0 26px; max-width: 60ch; font-size: 18px; color: var(--ink-2); }
+.vs-table { display: grid; grid-template-columns: 13rem 1fr 1fr; background: var(--page); border-radius: 8px; box-shadow: 0 0 0 1px var(--rule); overflow: hidden; }
+.vs-table > * { padding: 16px 20px; border-top: 1px solid var(--grid); }
+.vs-table > .h { border-top: 0; font-weight: 700; background: #000; color: #fff; }
+.vs-table > .h.old { color: #c8c9cb; }
+.vs-table .k { font-weight: 700; }
+.vs-table .old { color: var(--muted); }
+@media (max-width: 760px) {
+  .vs-table { grid-template-columns: 1fr; }
+  .vs-table > .h.k { display: none; }
+  .vs-table > .h:not(.k) { display: none; }
+  .vs-table .old::before { content: "A signed PDF: "; font-weight: 700; }
+  .vs-table .new::before { content: "Handshake: "; font-weight: 700; }
+  .vs-table .old, .vs-table .new { border-top: 0; padding-top: 0; }
+}
 
 /* How it works: four stops along one line */
 .how { position: relative; }
@@ -109,13 +127,13 @@ h2 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
   <section class="hero">
     <div>
       <h1>Agree on the rules. Keep them on record.</h1>
-      <p class="lede">Handshake keeps the agreements you make with the people in your life and work: what you agreed, who agreed, and when.</p>
+      <p class="lede">Handshake keeps the agreements you make with the people in your life and work, and lets them change one rule at a time, without drafting and signing a new PDF.</p>
       <a class="btn" href="/auth/google"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z"/><path fill="currentColor" opacity=".8" d="M12 22c2.7 0 5-.9 6.6-2.5l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z"/><path fill="currentColor" opacity=".6" d="M6.4 13.9a6 6 0 0 1 0-3.8V7.5H3.1a10 10 0 0 0 0 9z"/><path fill="currentColor" opacity=".9" d="M12 6c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z"/></svg>Sign in with Google</a>
     </div>
 
     <figure class="card" style="margin: 0;" aria-label="Example: a consulting agreement between Acme Corp and Priya Shah">
       <div class="card-head">
-        <b>Consulting Agreement</b>
+        <b>Consulting Agreement <strong class="tag">Legally binding</strong></b>
         <div class="legend"><span><i style="background: var(--blue);"></i>Acme Corp</span><span><i style="background: var(--orange);"></i>Priya Shah, consultant</span></div>
       </div>
       <div class="rules">
@@ -124,6 +142,17 @@ h2 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
         <div class="r"><div class="lane" aria-hidden="true"><i class="ln a dash end"></i><i class="ln p end"></i><i class="stn one"></i></div><div><p class="rt">Invoices still unpaid 30 days after they’re issued add a 3% late fee each month.</p><p class="rm">Priya agreed. Waiting for Acme Corp.</p></div></div>
       </div>
     </figure>
+  </section>
+
+  <section class="vs">
+    <h2>An agreement that keeps up with you</h2>
+    <p class="vs-lede">A PDF signed through DocuSign is fixed the day it’s signed. When anything changes, someone drafts an amendment or a new contract and everyone signs again. A Handshake agreement grows one rule at a time.</p>
+    <div class="vs-table" role="table" aria-label="A signed PDF compared with Handshake">
+      <div class="h k" role="columnheader"></div><div class="h old" role="columnheader">A PDF signed through DocuSign</div><div class="h" role="columnheader">Handshake</div>
+      <div class="k" role="rowheader">Changing one term</div><div class="old" role="cell">Draft an amendment or a new contract, send it out, and collect every signature again.</div><div class="new" role="cell">Write one new rule. Everyone agrees to that rule alone, and it replaces the old one.</div>
+      <div class="k" role="rowheader">What applies today</div><div class="old" role="cell">Read the original next to every amendment and work it out.</div><div class="new" role="cell">One page shows every rule in force, with replaced ones marked.</div>
+      <div class="k" role="rowheader">The record</div><div class="old" role="cell">Versions spread across email threads and folders.</div><div class="new" role="cell">Every rule and every agreement to it, kept in order and fingerprinted so nothing can be quietly changed.</div>
+    </div>
   </section>
 
   <section class="uses">
@@ -136,11 +165,11 @@ h2 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
       </ul>
     </div>
     <div class="card">
-      <div class="sign"><h2>At work</h2><p>Co-founders, clients and freelancers. Decisions in writing, signed when it matters.</p></div>
+      <div class="sign"><h2>At work</h2><p>Co-founders, clients and freelancers. Decisions in writing, and the whole agreement legally binding when it matters.</p></div>
       <ul class="strip" style="--line: var(--purple);">
         <li><b>Founders</b><span>Hiring decisions need both founders.</span></li>
-        <li><b>Equity</b><span>Shares vest over four years with a one-year cliff. <strong class="tag">Legally binding</strong></span></li>
-        <li><b>Clients</b><span>Neither partner takes on a competing client without the other’s agreement. <strong class="tag">Legally binding</strong></span></li>
+        <li><b>Equity</b><span>Shares vest over four years with a one-year cliff.</span></li>
+        <li><b>Clients</b><span>Neither partner takes on a competing client without the other’s agreement.</span></li>
       </ul>
     </div>
   </section>
