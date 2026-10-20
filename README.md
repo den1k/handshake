@@ -21,7 +21,13 @@ kept as a ledger: rules are added and superseded, never edited or erased.
   a repeal. Until then their line is dashed and everyone sees who hasn't agreed yet. Rules
   still waiting when someone joins need their agreement too.
 - Anyone can **Suggest a change** to a rule that's still waiting: if everyone agrees to the new
-  version, the original is closed as replaced.
+  version, the original is closed as replaced. The author of a rule that's still waiting can
+  **Withdraw** it; the withdrawal is recorded like any other entry.
+- Whenever rules are waiting for you, the bar above the agreement offers to agree to (or sign)
+  all of them in one step, with each one recorded on its own.
+- Every time a rule is agreed (or signed) by everyone, and every time someone agrees to or signs
+  the whole agreement, every member is emailed a PDF of the agreement: the parties, the rules in
+  force with who agreed and when, rules still waiting, and the history.
 
 ## Legally binding agreements
 
@@ -29,10 +35,12 @@ Tick **Legally binding** when creating an agreement (it's off by default), or sw
 in the agreement's **Settings** (author only, and it can't be switched off again). Then:
 
 1. Each member accepts, once per account, a notice about using electronic records and
-   signatures.
-2. Each member signs the agreement once: they read the rules in force, type their full legal
-   name and press **Sign**, next to the statement that they intend to be legally bound (the
-   press is the intent; there's no box to tick each time). The signature covers the
+   signatures. It's shown inline the first time they sign.
+2. Each member signs the agreement once: they type their full legal name (adopted once and
+   reused, with a link to change it) and press **Sign**, next to the statement that they intend
+   to be legally bound (the press is the intent; there's no box to tick each time). If there are
+   no rules in force yet, there's no separate step: their first rule signature also signs the
+   agreement. Someone joining an agreement that already has rules reviews them first. The signature covers the
    agreement's history as they saw it (its current fingerprint) and every rule they sign
    afterwards. Members who join later do the same, and can sign the rules waiting for them in
    the same step: each still gets its own signature over its own fingerprint.
@@ -49,16 +57,20 @@ removing or reordering anything breaks the chain; Settings and every certificate
 check. Each consent and signature records the time, IP address, device and Google account.
 Each rule and each agreement has a printable **certificate** (save it as a PDF from the
 browser) with the text, fingerprints and the full audit trail. When everyone has signed
-a rule, each of them is emailed its certificate; signing an agreement emails the signer a copy.
+a rule, or someone signs the agreement, every member is emailed the agreement as a PDF, with a
+link to the certificate.
 
 The agreement's author can also require that **every signature is confirmed with a six-digit
-code** emailed to the signer's Google address (Settings › Confirming signatures). Codes
-last ten minutes, work once, and stop working after five wrong tries. Each certificate
+code** emailed to the signer's Google address (Settings › Confirming signatures). One code
+covers a 15-minute signing session in that agreement on that device. Codes last ten minutes,
+work once, and stop working after five wrong tries. Each certificate
 records how a signature was confirmed and when the signer last signed in with Google.
 
 Members can **leave** an agreement from its Settings (the author can't). Rules then stop waiting
 for them, new and pending alike; everything they signed or agreed to stays on record, and they're
-still shown by name, with a grey line through the rules they agreed to.
+still shown by name, with a grey line through the rules they agreed to. The author can
+**remove** a member from Settings › Members, with the same effect; the removal is recorded and
+everyone, including the person removed, is told.
 
 This follows the usual requirements for electronic signatures (intent to sign, consent to
 sign electronically, signatures tied to the exact record, tamper evidence, a copy for each

@@ -6,6 +6,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import net from 'node:net';
 import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
@@ -88,6 +89,10 @@ sql.exec(`
   CREATE TABLE IF NOT EXISTS acceptances (ledger_id TEXT NOT NULL REFERENCES ledgers(id), user_id TEXT NOT NULL REFERENCES users(id), at TEXT NOT NULL, head_hash TEXT NOT NULL, entry_count INTEGER NOT NULL, ip TEXT NOT NULL, ua TEXT NOT NULL, PRIMARY KEY (ledger_id, user_id, at)) STRICT;
   CREATE TRIGGER IF NOT EXISTS acceptances_no_update BEFORE UPDATE ON acceptances BEGIN SELECT RAISE(ABORT, 'append-only'); END;
   CREATE TRIGGER IF NOT EXISTS acceptances_no_delete BEFORE DELETE ON acceptances BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+  -- Members the author removed: who, by whom and when. Append-only.
+  CREATE TABLE IF NOT EXISTS removals (ledger_id TEXT NOT NULL REFERENCES ledgers(id), user_id TEXT NOT NULL REFERENCES users(id), removed_by TEXT NOT NULL REFERENCES users(id), at TEXT NOT NULL, PRIMARY KEY (ledger_id, user_id, at)) STRICT;
+  CREATE TRIGGER IF NOT EXISTS removals_no_update BEFORE UPDATE ON removals BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS removals_no_delete BEFORE DELETE ON removals BEGIN SELECT RAISE(ABORT, 'append-only'); END;
   CREATE TRIGGER IF NOT EXISTS ledger_signatures_no_delete BEFORE DELETE ON ledger_signatures BEGIN SELECT RAISE(ABORT, 'append-only'); END;
   CREATE TRIGGER IF NOT EXISTS entry_signatures_no_update BEFORE UPDATE ON entry_signatures BEGIN SELECT RAISE(ABORT, 'append-only'); END;
   CREATE TRIGGER IF NOT EXISTS entry_signatures_no_delete BEFORE DELETE ON entry_signatures BEGIN SELECT RAISE(ABORT, 'append-only'); END;
@@ -162,6 +167,8 @@ const q = {
   entryAgreements: sql.prepare('SELECT user_id, at FROM entry_agreements WHERE entry_id = ?'),
   addAcceptance: sql.prepare('INSERT OR IGNORE INTO acceptances (ledger_id, user_id, at, head_hash, entry_count, ip, ua) VALUES (?, ?, ?, ?, ?, ?, ?)'),
   acceptances: sql.prepare('SELECT user_id, at FROM acceptances WHERE ledger_id = ? ORDER BY at'),
+  addRemoval: sql.prepare('INSERT INTO removals (ledger_id, user_id, removed_by, at) VALUES (?, ?, ?, ?)'),
+  removals: sql.prepare('SELECT user_id, removed_by, at FROM removals WHERE ledger_id = ? ORDER BY at'),
   entries: sql.prepare('SELECT id, author_id, created_at, required, doc FROM entries WHERE ledger_id = ? ORDER BY created_at, id'),
   entryIds: sql.prepare('SELECT id FROM entries WHERE ledger_id = ?'),
   agree: sql.prepare('INSERT OR IGNORE INTO entry_agreements (entry_id, user_id, at) VALUES (?, ?, ?)'),
@@ -284,12 +291,16 @@ async function finishGoogle(req, res, url) {
 /* ---------- email ---------- */
 const addrOf = s => { const m = String(s).match(/<([^>]+)>/); return (m ? m[1] : String(s)).trim(); };
 const b64 = s => Buffer.from(s, 'utf8').toString('base64').replace(/.{76}/g, '$&\r\n');
-function mime({ from, to, subject, text, html }) {
-  const boundary = 'hs_' + token(12);
+function mime({ from, to, subject, text, html, attachments = [] }) {
+  const alt = 'hs_' + token(12), mix = 'hs_' + token(12);
   const head = [`From: ${from}`, `To: ${to.join(', ')}`, `Subject: =?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`,
-    `Date: ${new Date().toUTCString()}`, `Message-ID: <${token(16)}@${BASE.hostname}>`, 'MIME-Version: 1.0', `Content-Type: multipart/alternative; boundary="${boundary}"`];
-  const part = (type, body) => `--${boundary}\r\nContent-Type: ${type}; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64(body)}\r\n`;
-  return head.join('\r\n') + '\r\n\r\n' + part('text/plain', text) + (html ? part('text/html', html) : '') + `--${boundary}--\r\n`;
+    `Date: ${new Date().toUTCString()}`, `Message-ID: <${token(16)}@${BASE.hostname}>`, 'MIME-Version: 1.0',
+    attachments.length ? `Content-Type: multipart/mixed; boundary="${mix}"` : `Content-Type: multipart/alternative; boundary="${alt}"`];
+  const part = (type, body) => `--${alt}\r\nContent-Type: ${type}; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64(body)}\r\n`;
+  const body = part('text/plain', text) + (html ? part('text/html', html) : '') + `--${alt}--\r\n`;
+  if (!attachments.length) return head.join('\r\n') + '\r\n\r\n' + body;
+  const files = attachments.map(a => `--${mix}\r\nContent-Type: ${a.contentType}; name="${a.filename}"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename="${a.filename}"\r\n\r\n${a.content.toString('base64').replace(/.{76}/g, '$&\r\n')}\r\n`).join('');
+  return head.join('\r\n') + '\r\n\r\n' + `--${mix}\r\nContent-Type: multipart/alternative; boundary="${alt}"\r\n\r\n` + body + files + `--${mix}--\r\n`;
 }
 // A minimal SMTP client: implicit TLS (smtps) or STARTTLS (smtp); plain text only to a local test server.
 function smtpSend(urlStr, from, to, raw) {
@@ -334,21 +345,21 @@ function smtpSend(urlStr, from, to, raw) {
   });
 }
 // Fire-and-forget delivery, logged; a failed email never fails the request that caused it.
-async function sendMail({ to, subject, text, html }) {
+async function sendMail({ to, subject, text, html, attachments = [] }) {
   to = [...new Set(to.filter(Boolean))];
   if (!to.length) return false;
   const at = now();
   try {
     if (MAIL_TRANSPORT === 'resend') {
       const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { authorization: `Bearer ${RESEND_KEY}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ from: MAIL_FROM, to, subject, text, html }) });
+        body: JSON.stringify({ from: MAIL_FROM, to, subject, text, html, attachments: attachments.map(a => ({ filename: a.filename, content: a.content.toString('base64') })) }) });
       if (!r.ok) throw new Error(`Resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
     } else if (MAIL_TRANSPORT === 'smtp') {
-      await smtpSend(SMTP_URL, MAIL_FROM, to, mime({ from: MAIL_FROM, to, subject, text, html }));
+      await smtpSend(SMTP_URL, MAIL_FROM, to, mime({ from: MAIL_FROM, to, subject, text, html, attachments }));
     } else {
       const dir = path.join(DATA_DIR, 'outbox');
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      fs.writeFileSync(path.join(dir, `${at.replace(/[:.]/g, '-')}-${token(4)}.eml`), mime({ from: MAIL_FROM, to, subject, text, html }), { mode: 0o600 });
+      fs.writeFileSync(path.join(dir, `${at.replace(/[:.]/g, '-')}-${token(4)}.eml`), mime({ from: MAIL_FROM, to, subject, text, html, attachments }), { mode: 0o600 });
     }
     for (const t of to) q.logMail.run(at, t, subject, MAIL_TRANSPORT, 'sent', '');
     return true;
@@ -474,31 +485,46 @@ function signatureFrom(body) {
   if (name.length < 2 || body.intent !== true) return null;
   return name;
 }
-// Before signing anything in a binding ledger: consent to e-signatures, then sign the ledger itself.
+// Before signing anything in a binding agreement: consent to e-signatures, once per account. The agreement itself is
+// signed with a member's first signature in it, unless it has rules they must review first (rules everyone had agreed
+// to before they joined, still standing): then signing the agreement is its own, deliberate step.
 function bindingBlock(lid, me) {
   if (!q.consent.get(me.id, ESIGN_VERSION)) return { code: 'needs_consent', message: 'Accept the notice about electronic signatures first.' };
-  if (!q.ledgerSig.get(lid, me.id)) return { code: 'needs_ledger_signature', message: 'Sign the agreement before signing rules in it.' };
+  if (!q.ledgerSig.get(lid, me.id) && coveredFor(lid, me.id)) return { code: 'needs_ledger_signature', message: 'Review and sign the agreement first: it has rules that were agreed before you joined.' };
   return null;
 }
+function signLedgerOnce(l, me, name, req) {
+  if (q.ledgerSig.get(l.id, me.id)) return false;
+  const head = headOf(l.id);
+  q.addLedgerSig.run(l.id, me.id, now(), name, ledgerStatement(l, head.count, head.hash), head.hash, head.count, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || '');
+  return true;
+}
 const entryNumber = (lid, eid) => { const h = q.entryHash.get(eid); return h ? h.seq : 0; };
-// Ledgers that ask for it confirm every signature with a six-digit code emailed to the signer's Google address.
-function checkCode(l, me, purpose, code) {
-  if (!l.verify_email) return null;
+// Agreements that ask for it confirm signatures with a six-digit code emailed to the signer's Google address, once per
+// signing session: a code entered on a device covers everything signed in that agreement there for SIGN_WINDOW_MIN minutes.
+const SIGN_WINDOW_MIN = 15, signWindows = new Map();
+const windowKey = (req, lid) => digest(String(cookies(req).hs_session || '')) + ':' + lid;
+const inSigningWindow = (req, lid) => (signWindows.get(windowKey(req, lid)) || 0) > Date.now();
+function checkCode(l, me, req, code) {
+  if (!l.verify_email || inSigningWindow(req, l.id)) return null;
+  const purpose = 'signing';
   const c = q.code.get(me.id, l.id, purpose);
   if (!c || c.expires_at < now()) return { code: 'needs_code', message: 'Email yourself a code and enter it to sign.' };
   if (c.attempts >= 5) { q.codeDone.run(me.id, l.id, purpose); return { code: 'needs_code', message: 'Too many wrong codes. Email yourself a new one.' }; }
   if (!/^\d{6}$/.test(String(code || '')) || digest(me.id + ':' + code) !== c.code_hash) { q.codeMiss.run(me.id, l.id, purpose); return { code: 'bad_code', message: 'That code isn’t right. Check the email and try again.' }; }
   q.codeDone.run(me.id, l.id, purpose);
+  signWindows.set(windowKey(req, l.id), Date.now() + SIGN_WINDOW_MIN * 60e3);
+  if (signWindows.size > 5000) for (const [k, t] of signWindows) if (t < Date.now()) signWindows.delete(k);
   return null;
 }
-const methodOf = l => l.verify_email ? 'Google sign-in + code emailed to the account address' : 'Google sign-in';
+const methodOf = l => l.verify_email ? `Google sign-in + code emailed to the account address (one code per ${SIGN_WINDOW_MIN}-minute signing session)` : 'Google sign-in';
 // Every other member's devices hear when an entry is added or someone agrees to it.
 function notifyLedger(lid, me, eid, agreed) {
   const l = q.ledger.get(lid), ents = q.entries.all(lid), ent = ents.find(e => e.id === eid), doc = JSON.parse(ent.doc);
   const label = id => `§ ${entryNumber(lid, id)} · ${JSON.parse(ents.find(e => e.id === id).doc).title || 'Untitled'}`;
   const targets = (doc.supersedes || []).map(label).join(', '), repeal = doc.kind === 'repeal';
   let body;
-  if (!agreed) body = repeal ? `${me.name} proposed repealing ${targets}` : `${me.name} added ${label(eid)}${targets ? `, replacing ${targets}` : ''}`;
+  if (!agreed) body = doc.kind === 'withdraw' ? `${me.name} withdrew ${targets}` : repeal ? `${me.name} proposed repealing ${targets}` : `${me.name} added ${label(eid)}${targets ? `, replacing ${targets}` : ''}`;
   else {
     const has = new Set(q.agreements.all(lid).filter(a => a.entry_id === eid).map(a => a.user_id));
     const done = neededFor(lid, eid).every(u => has.has(u)), signed = !!l.binding_since;
@@ -506,6 +532,224 @@ function notifyLedger(lid, me, eid, agreed) {
   }
   notify(q.members.all(lid).map(m => m.id).filter(id => id !== me.id), { title: l.name, body, url: `/?l=${encodeURIComponent(lid)}` });
 }
+// Agree to several entries this member is needed for (not legally binding: no signatures).
+function agreeMany(lid, me, entries) {
+  let agreed = 0;
+  for (const eid of Array.isArray(entries) ? entries.slice(0, 200).map(String) : []) {
+    const e = q.entry.get(eid);
+    if (!e || e.ledger_id !== lid || !neededFor(lid, eid).includes(me.id)) continue;
+    if (q.agree.run(eid, me.id, now()).changes) { agreed++; notifyLedger(lid, me, eid, true); announceIfComplete(lid, eid); }
+  }
+  return agreed;
+}
+/* ---------- emails: one design ----------
+   The app's black station sign with its white rule and the logo, a heading, the message, a black button and a quiet
+   footer. Tables and inline styles, as email clients need. heading/intro/quote/code are text; note is trusted HTML. */
+function emailHtml({ heading, intro, quote, code, note, button }) {
+  const e = escHtml, F = `'Helvetica Neue',Helvetica,Arial,sans-serif`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#e8e6e0">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#e8e6e0"><tr><td align="center" style="padding:28px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:#ffffff;border-radius:8px;overflow:hidden;font-family:${F};color:#000000">
+<tr><td style="background:#000000;padding:12px 0 0"><div style="height:4px;line-height:4px;font-size:0;background:#ffffff">&nbsp;</div></td></tr>
+<tr><td style="background:#000000;padding:18px 28px 22px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td style="padding-right:12px;vertical-align:middle"><img src="${e(BASE_URL)}/icon-192.png" width="40" height="40" alt="" style="display:block;border:0;border-radius:6px"></td>
+<td style="vertical-align:middle;color:#ffffff;font:700 24px/1 ${F};letter-spacing:-0.5px">handshake</td></tr></table></td></tr>
+<tr><td style="padding:30px 28px 8px">
+<h1 style="margin:0 0 12px;font:700 24px/1.25 ${F};letter-spacing:-0.4px;color:#000000">${e(heading)}</h1>
+${intro ? `<p style="margin:0 0 18px;font:16px/1.5 ${F};color:#3a3c3f">${e(intro)}</p>` : ''}
+${quote ? `<p style="margin:0 0 20px;padding:12px 16px;border-left:4px solid #000000;background:#f7f6f2;font:16px/1.5 ${F};color:#000000;white-space:pre-wrap">${e(quote)}</p>` : ''}
+${code ? `<p style="margin:4px 0 22px;font:700 40px/1 ${F};letter-spacing:10px;color:#000000">${e(code)}</p>` : ''}
+${button ? `<p style="margin:0 0 22px"><a href="${e(button.href)}" style="display:inline-block;background:#000000;color:#ffffff;padding:12px 22px;border-radius:6px;text-decoration:none;font:700 15px ${F}">${e(button.label)}</a></p>` : ''}
+${note ? `<p style="margin:0 0 22px;font:14px/1.5 ${F};color:#53565a">${note}</p>` : ''}
+</td></tr>
+<tr><td style="padding:16px 28px 22px;border-top:1px solid #e3e3e0;font:12px/1.5 ${F};color:#53565a">Handshake keeps agreements on record: agreed, recorded, never erased. <a href="${e(BASE_URL)}" style="color:#53565a">${e(BASE.host)}</a></td></tr>
+</table></td></tr></table></body></html>`;
+}
+function codeEmail(me, l, code) {
+  const covers = `It works for ${CODE_MINUTES} minutes, and covers everything you sign in this agreement on that device for the next ${SIGN_WINDOW_MIN} minutes.`;
+  return { to: [me.email], subject: `${code} is your Handshake signing code`,
+    text: `Your code to sign in “${l.name}” is ${code}. ${covers} If you didn’t ask for it, ignore this email.`,
+    html: emailHtml({ heading: 'Your signing code', intro: `Enter this code to sign in “${l.name}”.`, code, note: `${covers} If you didn’t ask for it, you can ignore this email.` }) };
+}
+// Every member gets the whole agreement, as it now stands, as a PDF.
+function mailAgreement(lid, { subject, heading, intro, quote, cert }) {
+  const l = q.ledger.get(lid), link = `${BASE_URL}/?l=${encodeURIComponent(lid)}`;
+  const file = `Handshake - ${l.name.replace(/[^\w\- ]+/g, '').trim() || 'agreement'}.pdf`;
+  sendMail({ to: q.members.all(lid).map(m => m.email), subject,
+    text: `${intro}\n\n${quote ? quote + '\n\n' : ''}The whole agreement, as it now stands, is attached as a PDF.${cert ? `\nThe certificate with the full audit trail: ${cert}` : ''}\nOpen it in Handshake: ${link}`,
+    html: emailHtml({ heading, intro, quote, button: { href: link, label: `Open “${l.name}”` },
+      note: `The whole agreement, as it now stands, is attached as a PDF.${cert ? ` The <a href="${escHtml(cert)}" style="color:#000000">certificate</a> has the full audit trail.` : ''}` }),
+    attachments: [{ filename: file, contentType: 'application/pdf', content: agreementPdf(lid) }] });
+}
+// A rule agreed (or signed) by everyone: tell everyone, with the agreement attached.
+function announceIfComplete(lid, eid) {
+  const ent = q.entry.get(eid);
+  if (!ent || JSON.parse(ent.doc).kind === 'withdraw' || !isComplete(lid, eid)) return;
+  const l = q.ledger.get(lid), doc = JSON.parse(ent.doc), n = entryNumber(lid, eid), signed = !!l.binding_since;
+  const later = doc.effectiveOn > now().slice(0, 10);
+  mailAgreement(lid, { subject: `${l.name}: § ${n} ${signed ? 'signed' : 'agreed'} by everyone`,
+    heading: `§ ${n} · ${doc.title || 'Untitled'}`,
+    intro: `Everyone in “${l.name}” has ${signed ? 'signed' : 'agreed to'} § ${n}. ${later ? `It takes effect on ${longDay(doc.effectiveOn)}.` : 'It is now in effect.'}`,
+    quote: doc.text, cert: signed ? `${BASE_URL}/certificate/${lid}/${eid}` : '' });
+}
+// Someone signed (or agreed to) the agreement as a whole.
+function announceAgreement(lid, me, signed) {
+  const l = q.ledger.get(lid);
+  mailAgreement(lid, { subject: `${l.name}: ${me.name} ${signed ? 'signed' : 'agreed to'} the agreement`,
+    heading: `${me.name} ${signed ? 'signed' : 'agreed to'} “${l.name}”`,
+    intro: `${me.name} ${signed ? 'signed' : 'agreed to'} the agreement as a whole, with every rule in force.`,
+    cert: signed ? `${BASE_URL}/certificate/${lid}` : '' });
+}
+
+/* ---------- the agreement as a PDF ----------
+   Lean and readable, and enough to stand as a record: who the parties are and how each signed (or agreed to) the
+   agreement, the rules in force with initials and dates, what's still waiting, a one-line history, and, for a legally
+   binding agreement, its fingerprint and the certificate that holds the full audit trail. A small writer: A4 pages and
+   the PDF's built-in Helvetica (nothing to embed), WinAnsi text wrapped by the fonts' own widths. */
+const HELV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+const HELV_B = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584];
+const WIN = { '€': 128, '‚': 130, '„': 132, '…': 133, '‘': 145, '’': 146, '“': 147, '”': 148, '•': 149, '–': 150, '—': 151, '™': 153 };
+const winByte = ch => { const c = ch.codePointAt(0); return (c >= 32 && c <= 126) || (c >= 160 && c <= 255) ? c : WIN[ch] || 63; };
+const pdfStr = s => '(' + [...String(s)].map(ch => { const b = winByte(ch); return b === 40 || b === 41 || b === 92 ? '\\' + String.fromCharCode(b) : b < 128 ? String.fromCharCode(b) : '\\' + b.toString(8).padStart(3, '0'); }).join('') + ')';
+const widthOf = (s, size, bold) => [...String(s)].reduce((w, ch) => { const c = winByte(ch); return w + (c >= 32 && c <= 126 ? (bold ? HELV_B : HELV)[c - 32] : 500); }, 0) * size / 1000;
+function pdfDoc() {
+  const W = 595.28, H = 841.89, M = 50, pages = [];
+  let ops = null, y = 0;
+  const rgb = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => (v / 255).toFixed(3)).join(' '); };
+  const f = v => v.toFixed(2);
+  const d = {
+    W, H, M, pages, get y() { return y; },
+    newPage() { ops = []; pages.push(ops); y = H - M; },
+    room(h) { if (y - h < M + 24) d.newPage(); },
+    gap(h) { y -= h; },
+    rect(x, top, w, h, hex) { ops.push(`${rgb(hex)} rg ${f(x)} ${f(top - h)} ${f(w)} ${f(h)} re f`); },
+    pill(x, top, w, h, fill, stroke, lw) {
+      const r = h / 2, k = r * 0.5523, b = top - h;
+      ops.push(`${rgb(fill)} rg ${rgb(stroke)} RG ${lw} w ${f(x + r)} ${f(b)} m ${f(x + w - r)} ${f(b)} l ${f(x + w - r + k)} ${f(b)} ${f(x + w)} ${f(b + r - k)} ${f(x + w)} ${f(b + r)} c ${f(x + w)} ${f(b + r + k)} ${f(x + w - r + k)} ${f(top)} ${f(x + w - r)} ${f(top)} c ${f(x + r)} ${f(top)} l ${f(x + r - k)} ${f(top)} ${f(x)} ${f(b + r + k)} ${f(x)} ${f(b + r)} c ${f(x)} ${f(b + r - k)} ${f(x + r - k)} ${f(b)} ${f(x + r)} ${f(b)} c B`);
+    },
+    at(str, x, base, size, bold, hex = '#000000', page = ops) { page.push(`BT ${rgb(hex)} rg /${bold ? 'F2' : 'F1'} ${size} Tf ${f(x)} ${f(base)} Td ${pdfStr(str)} Tj ET`); },
+    // Text wrapped to a width, from the cursor down.
+    para(str, { x = M, width = W - 2 * M, size = 10.5, bold = false, hex = '#000000', lead = 1.45 } = {}) {
+      const lh = size * lead;
+      for (const raw of String(str).split('\n')) {
+        const words = raw.split(/\s+/).filter(Boolean);
+        if (!words.length) { y -= lh * 0.5; continue; }
+        let line = '';
+        const out = () => { d.room(lh); y -= lh; d.at(line, x, y + (lh - size) / 2 + size * 0.22, size, bold, hex); line = ''; };
+        for (const w of words) { const t = line ? line + ' ' + w : w; if (line && widthOf(t, size, bold) > width) { out(); line = w; } else line = t; }
+        if (line) out();
+      }
+    },
+    build(title, footer) {
+      pages.forEach((p, i) => d.at(footer(i + 1, pages.length), M, M - 26, 8, false, '#8d8f92', p));
+      const objs = [];
+      const add = o => { objs.push(o); return objs.length; };
+      add('<< /Type /Catalog /Pages 2 0 R >>'); add('');
+      add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+      add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+      const kids = pages.map(p => {
+        const content = zlib.deflateSync(Buffer.from(p.join('\n'), 'latin1'));
+        const c = add({ dict: `<< /Length ${content.length} /Filter /FlateDecode >>`, stream: content });
+        return add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${c} 0 R >>`);
+      });
+      objs[1] = `<< /Type /Pages /Kids [${kids.map(k => k + ' 0 R').join(' ')}] /Count ${kids.length} >>`;
+      const info = add(`<< /Title ${pdfStr(title)} /Producer (Handshake) /CreationDate (D:${now().replace(/[-:T]/g, '').slice(0, 14)}Z) >>`);
+      const chunks = [Buffer.from('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n', 'latin1')], xref = [];
+      let off = chunks[0].length;
+      objs.forEach((o, i) => {
+        const b = typeof o === 'string' ? Buffer.from(`${i + 1} 0 obj\n${o}\nendobj\n`, 'latin1')
+          : Buffer.concat([Buffer.from(`${i + 1} 0 obj\n${o.dict}\nstream\n`, 'latin1'), o.stream, Buffer.from('\nendstream\nendobj\n', 'latin1')]);
+        xref.push(off); chunks.push(b); off += b.length;
+      });
+      chunks.push(Buffer.from(`xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${xref.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('')}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R /Info ${info} 0 R >>\nstartxref\n${off}\n%%EOF\n`, 'latin1'));
+      return Buffer.concat(chunks);
+    },
+  };
+  return d;
+}
+const LINE_COLORS = ['#0080c7', '#f38400', '#009a63', '#dc1440', '#af3788', '#fdd200', '#74b02e', '#979799', '#996633'];
+function agreementPdf(lid) {
+  const l = q.ledger.get(lid), binding = !!l.binding_since, members = q.members.all(lid), ents = q.fullEntries.all(lid);
+  const agreements = q.agreements.all(lid), lsigs = q.ledgerSigs.all(lid), accs = q.acceptances.all(lid), rems = q.removals.all(lid);
+  const today = now().slice(0, 10), user = id => q.user.get(id) || { name: 'someone', email: '' };
+  const initials = id => { const w = user(id).name.split(/\s+/).filter(Boolean); return ((w[0] || '?')[0] + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase(); };
+  const day = iso => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const stamp = iso => `${day(iso)}, ${new Date(iso).toISOString().slice(11, 16)} UTC`;
+  // Each entry's state, as the app shows it.
+  const E = ents.map((e, i) => {
+    const doc = JSON.parse(e.doc), got = new Map(agreements.filter(a => a.entry_id === e.id).map(a => [a.user_id, a.at])), need = neededFor(lid, e.id);
+    const all = need.length > 0 && need.every(u => got.has(u)), doneAt = all ? need.map(u => got.get(u)).sort().pop() : '', later = all && doc.effectiveOn > today;
+    return { e, doc, n: i + 1, got, need, all, later, effective: all && !later, since: all ? [doneAt, doc.effectiveOn ? doc.effectiveOn + 'T00:00:00.000Z' : ''].sort().pop() : '' };
+  });
+  for (const x of E) x.by = E.filter(o => o.effective && (o.doc.supersedes || []).includes(x.e.id));
+  const sigOf = id => lsigs.find(s => s.user_id === id), accOf = id => accs.filter(a => a.user_id === id).pop();
+  const d = pdfDoc();
+  d.newPage();
+  // The station sign: black band, white rule, the mark and the name.
+  d.rect(0, d.H, d.W, 62, '#000000'); d.rect(0, d.H - 10, d.W, 3, '#ffffff');
+  const mx = d.M, mt = d.H - 24;
+  d.rect(mx + 3.5, mt, 5.2, 26, '#0080c7'); d.rect(mx + 17.3, mt, 5.2, 26, '#f38400'); d.pill(mx + 1.7, mt - 9.1, 22.6, 7.8, '#ffffff', '#ffffff', 0.5);
+  d.at('handshake', mx + 36, d.H - 44, 18, true, '#ffffff');
+  d.gap(62);
+  d.para(l.name, { size: 22, bold: true, lead: 1.25 });
+  d.para(`${binding ? `Legally binding agreement${l.governing_law ? ` · governing law: ${l.governing_law}` : ''}` : 'Agreement'} · copy of ${stamp(now())}`, { size: 9.5, hex: '#53565a' });
+  const section = t => { d.room(60); d.gap(16); d.para(t, { size: 12.5, bold: true, lead: 1.3 }); d.rect(d.M, d.y - 2, d.W - 2 * d.M, 0.8, '#d6d3cb'); d.gap(8); };
+
+  section('Parties');
+  members.forEach((m, i) => {
+    d.room(36);
+    const top = d.y;
+    d.rect(d.M, top - 2, 4, 26, LINE_COLORS[i % LINE_COLORS.length]);
+    d.at(m.name, d.M + 12, top - 12, 10.5, true);
+    d.at(m.email, d.M + 16 + widthOf(m.name, 10.5, true), top - 12, 9, false, '#53565a');
+    const s = sigOf(m.id), a = accOf(m.id);
+    const how = binding ? (s ? `Signed the agreement as “${s.typed_name}”, ${stamp(s.at)}` : 'Hasn’t signed the agreement yet')
+      : a ? `Agreed to the whole agreement, ${stamp(a.at)}` : m.role === 'owner' ? `Started the agreement, ${stamp(l.created_at)}`
+        : coveredFor(lid, m.id) ? 'Hasn’t agreed to the whole agreement yet' : `Member since ${stamp(m.joined_at)}`;
+    d.at(how, d.M + 12, top - 25, 9, false, '#3a3c3f');
+    d.gap(34);
+  });
+  const former = [...new Set(ents.flatMap(e => [e.author_id, ...JSON.parse(e.required)]))].filter(u => !members.some(m => m.id === u));
+  if (former.length) d.para('Former members: ' + former.map(u => { const r = rems.filter(x => x.user_id === u).pop(); return `${user(u).name} (${r ? `removed by ${user(r.removed_by).name}, ${day(r.at)}` : 'left'})`; }).join('; '), { size: 9, hex: '#53565a' });
+
+  const force = E.filter(x => x.doc.kind === 'rule' && x.all && !x.by.length);
+  section(`Rules in force${force.some(x => x.later) ? ' (and signed to take effect later)' : ''}`);
+  if (!force.length) d.para('None yet.', { size: 10, hex: '#53565a' });
+  for (const x of force) {
+    d.room(70);
+    d.para(`§ ${x.n}  ${x.doc.title || 'Untitled'}`, { size: 11.5, bold: true, lead: 1.35 });
+    d.para(x.doc.text, { size: 10.5 });
+    const covered = members.filter(m => !x.got.has(m.id) && m.joined_at > x.e.created_at && (binding ? sigOf(m.id) : accOf(m.id))).map(m => `${initials(m.id)} (with the agreement)`);
+    const marks = [...x.got].map(([u, at]) => `${initials(u)} ${day(at)}`).concat(covered).join('   ');
+    d.para(`${x.later ? `Takes effect ${longDay(x.doc.effectiveOn)}` : `In force since ${day(x.since)}`}   ·   ${binding ? 'Signed' : 'Agreed'}: ${marks}`, { size: 8.5, hex: '#53565a' });
+    if (binding) { const h = q.entryHash.get(x.e.id); if (h) d.para(`Fingerprint ${h.hash}`, { size: 7, hex: '#8d8f92' }); }
+    d.gap(8);
+  }
+  const waiting = E.filter(x => !x.all && !x.by.length && x.doc.kind !== 'withdraw');
+  if (waiting.length) {
+    section('Waiting for agreement');
+    for (const x of waiting) d.para(`§ ${x.n}  ${x.doc.title || 'Untitled'}  ·  waiting for ${x.need.filter(u => !x.got.has(u)).map(u => user(u).name).join(', ')}`, { size: 9.5 });
+  }
+  const past = E.filter(x => x.by.length || (x.doc.kind !== 'rule' && x.all));
+  if (past.length) {
+    section('History');
+    for (const x of past) {
+      const b = x.by[0];
+      const what = x.doc.kind === 'withdraw' ? `withdrew § ${(x.doc.supersedes || []).map(id => (E.find(o => o.e.id === id) || {}).n).join(', ')}`
+        : x.doc.kind === 'repeal' ? `repeal, in effect since ${day(x.since)}`
+        : b ? `${b.doc.kind === 'withdraw' ? 'withdrawn' : b.doc.kind === 'repeal' ? 'repealed' : 'replaced'} by § ${b.n}, ${day(b.since)}` : '';
+      d.para(`§ ${x.n}  ${x.doc.title || 'Untitled'}  ·  ${what}`, { size: 9.5, hex: '#3a3c3f' });
+    }
+  }
+  d.gap(14);
+  const head = headOf(lid);
+  d.para(binding
+    ? `This copy shows the agreement as it stood on ${stamp(now())}. Agreement fingerprint: ${head.hash} (${head.count} entries). Each signature was made electronically after the signer accepted the notice on electronic records and signatures; the certificate at ${BASE_URL}/certificate/${lid} has the full audit trail: times, IP addresses, devices and each signature’s statement.`
+    : `This copy shows the agreement as it stood on ${stamp(now())}. Open it in Handshake: ${BASE_URL}/?l=${lid}`, { size: 8, hex: '#8d8f92' });
+  return d.build(`${l.name} · Handshake`, (i, n) => `${l.name}  ·  Handshake  ·  page ${i} of ${n}`);
+}
+
 // Who an entry needs: the members it required who are still members, plus anyone who agreed before leaving (leaving
 // stops blocking; what someone agreed to stays on record), plus anyone who joined while it was still waiting. Joining
 // means agreeing to the agreement as a whole, which covers what everyone had already agreed to, not what was pending.
@@ -518,25 +762,25 @@ function neededFor(lid, eid) {
   const late = q.members.all(lid).filter(m => !base.includes(m.id) && m.joined_at > ent.created_at && !(doneAt && doneAt <= m.joined_at)).map(m => m.id);
   return base.concat(late);
 }
+// Everyone the entry needs has agreed (for a binding agreement, agreeing and signing are recorded together).
+const isComplete = (lid, eid) => { const a = new Set(q.entryAgreements.all(eid).map(x => x.user_id)), need = neededFor(lid, eid); return need.length > 0 && need.every(u => a.has(u)); };
+// An entry still standing: not replaced, repealed or withdrawn by a complete one.
+const isStanding = (lid, eid, ents = q.entries.all(lid)) => !ents.some(o => o.id !== eid && (JSON.parse(o.doc).supersedes || []).includes(eid) && isComplete(lid, o.id));
+// Rules everyone had agreed to before this member joined and that still stand: what they take on by signing the agreement.
+function coveredFor(lid, uid) {
+  const m = q.members.all(lid).find(x => x.id === uid), ents = q.entries.all(lid);
+  if (!m) return 0;
+  return ents.filter(e => e.created_at < m.joined_at && JSON.parse(e.doc).kind !== 'withdraw' && !neededFor(lid, e.id).includes(uid) && isComplete(lid, e.id) && isStanding(lid, e.id, ents)).length;
+}
 const signersOf = (lid, eid) => new Set(q.entrySigs.all(lid).filter(s => s.entry_id === eid).map(s => s.user_id));
 const allSigned = (lid, eid) => { const s = signersOf(lid, eid), need = neededFor(lid, eid); return need.length > 0 && need.every(u => s.has(u)); };
-// When the last required signature lands, everyone gets the certificate by email.
-function mailIfComplete(lid, eid) {
-  const ent = q.entry.get(eid);
-  if (!ent || !allSigned(lid, eid)) return;
-  const req = neededFor(lid, eid);
-  const l = q.ledger.get(lid), doc = JSON.parse(q.fullEntries.all(lid).find(x => x.id === eid).doc), n = entryNumber(lid, eid);
-  sendMail({ to: req.map(u => (q.user.get(u) || {}).email), subject: `Signed by everyone: § ${n} · ${doc.title || 'Untitled'} (${l.name})`,
-    text: `Everyone has signed § ${n} of “${l.name}”. ${doc.effectiveOn > now().slice(0, 10) ? `It takes effect on ${longDay(doc.effectiveOn)}.` : 'It is now in effect.'}\n\n${doc.text}\n\nThe certificate is attached as the HTML version of this email, and online at ${BASE_URL}/certificate/${lid}/${eid}`,
-    html: certificateHtml(lid, eid).html });
-}
 
 function ledgerState(lid, me) {
   const l = q.ledger.get(lid);
   const head = headOf(lid);
   const sigs = q.entrySigs.all(lid);
   const hashes = new Map(q.hashes.all(lid).map(h => [h.entry_id, h.hash]));
-  const members = q.members.all(lid), ents = q.entries.all(lid);
+  const members = q.members.all(lid), ents = q.entries.all(lid), removals = q.removals.all(lid);
   return {
     ledger: { id: l.id, name: l.name, createdBy: l.created_by, createdAt: l.created_at, binding: !!l.binding_since, bindingSince: l.binding_since, governingLaw: l.governing_law, verifyEmail: !!l.verify_email,
       head: head.hash, headCount: head.count, statement: l.binding_since ? ledgerStatement(l, head.count, head.hash) : '' },
@@ -549,7 +793,7 @@ function ledgerState(lid, me) {
     members: members.map(m => ({ id: m.id, name: m.name, email: m.email, picture: m.picture, role: m.role, joinedAt: m.joined_at })),
     // People named in the history who have since left, so they can still be shown by name.
     formerMembers: [...new Set(ents.flatMap(e => [e.author_id, ...JSON.parse(e.required)]))].filter(u => !members.some(m => m.id === u))
-      .map(u => q.user.get(u)).filter(Boolean).map(u => ({ id: u.id, name: u.name })),
+      .map(u => q.user.get(u)).filter(Boolean).map(u => ({ id: u.id, name: u.name, removed: removals.some(r => r.user_id === u.id) })),
     entries: ents.map(e => Object.assign(JSON.parse(e.doc), { id: e.id, authorId: e.author_id, createdAt: e.created_at, required: JSON.parse(e.required), hash: hashes.get(e.id) || '' })),
     agreements: q.agreements.all(lid).map(a => ({ entryId: a.entry_id, userId: a.user_id, at: a.at })),
     acceptances: q.acceptances.all(lid).map(a => ({ userId: a.user_id, at: a.at })),
@@ -562,7 +806,7 @@ function cleanDoc(doc, lid) {
   const s = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
   const eff = q.ledger.get(lid).binding_since && isDay(doc.effectiveOn) ? doc.effectiveOn : '';
   return {
-    kind: doc.kind === 'repeal' ? 'repeal' : 'rule',
+    kind: doc.kind === 'repeal' || doc.kind === 'withdraw' ? doc.kind : 'rule',
     title: s(doc.title, 120), text: s(doc.text, 20000), draft: s(doc.draft, 20000),
     supersedes: own(doc.supersedes), relates: own(doc.relates),
     relations: (Array.isArray(doc.relations) ? doc.relations : []).filter(r => r && ids.has(String(r.ruleId))).slice(0, 50).map(r => ({
@@ -812,7 +1056,7 @@ const server = http.createServer(async (req, res) => {
       const lid = parts[2];
       if (!q.ledger.get(lid) || !q.member.get(lid, me.id)) return send(res, 404, { code: 'not_found', message: 'No such agreement, or you aren’t a member.' });
 
-      if (req.method === 'GET' && parts.length === 3) return send(res, 200, ledgerState(lid, me));
+      if (req.method === 'GET' && parts.length === 3) return send(res, 200, Object.assign(ledgerState(lid, me), { signingConfirmed: inSigningWindow(req, lid) }));
       if (req.method === 'GET' && parts[3] === 'verify' && parts.length === 4) return send(res, 200, verifyLedger(lid));
 
       // Settings: only the author can make a ledger binding (one way) or set its governing law.
@@ -842,21 +1086,38 @@ const server = http.createServer(async (req, res) => {
         q.addAcceptance.run(lid, me.id, now(), head.hash, head.count, clientIp(req), clientUa(req));
         notify(q.members.all(lid).map(m => m.id).filter(id => id !== me.id), { title: l.name, body: `${me.name} agreed to the whole agreement.`, url: `/?l=${encodeURIComponent(lid)}` });
         // The rules still waiting for this member can be agreed in the same step.
-        let agreed = 0;
-        for (const eid of Array.isArray(entries) ? entries.slice(0, 200).map(String) : []) {
-          const e = q.entry.get(eid);
-          if (!e || e.ledger_id !== lid || !neededFor(lid, eid).includes(me.id)) continue;
-          if (q.agree.run(eid, me.id, now()).changes) { agreed++; notifyLedger(lid, me, eid, true); }
-        }
+        const agreed = agreeMany(lid, me, entries);
+        announceAgreement(lid, me, false);
         return send(res, 200, { ok: true, agreed });
+      }
+
+      // Agreeing to several waiting rules at once (signing does this in a binding agreement).
+      if (req.method === 'POST' && parts[3] === 'agree' && parts.length === 4) {
+        if (q.ledger.get(lid).binding_since) return send(res, 409, { code: 'binding', message: 'This agreement is legally binding: sign the rules instead.' });
+        const { entries } = await readBody(req);
+        return send(res, 200, { ok: true, agreed: agreeMany(lid, me, entries) });
+      }
+
+      // The author can remove a member (someone who no longer takes part). Recorded, and everyone is told; rules stop
+      // waiting for them, and what they agreed to or signed stays on record.
+      if (req.method === 'POST' && parts[3] === 'members' && parts[5] === 'remove' && parts.length === 6) {
+        if (q.member.get(lid, me.id).role !== 'owner') return send(res, 403, { code: 'forbidden', message: 'Only the agreement’s author can remove members.' });
+        const uid = parts[4], m = q.member.get(lid, uid), who = q.user.get(uid);
+        if (!m || !who) return send(res, 404, { code: 'not_found', message: 'They aren’t a member.' });
+        if (m.role === 'owner') return send(res, 409, { code: 'owner', message: 'The author can’t be removed.' });
+        const l = q.ledger.get(lid), waiting = q.entries.all(lid).filter(e => !isComplete(lid, e.id));
+        tx(() => { q.leave.run(lid, uid); q.addRemoval.run(lid, uid, me.id, now()); });
+        notify(q.members.all(lid).map(x => x.id).concat(uid).filter(id => id !== me.id), { title: l.name, body: `${me.name} removed ${who.name} from the agreement.`, url: `/?l=${encodeURIComponent(lid)}` });
+        for (const e of waiting) announceIfComplete(lid, e.id);
+        return send(res, 200, { ok: true });
       }
 
       if (req.method === 'POST' && parts[3] === 'leave' && parts.length === 4) {
         if (q.member.get(lid, me.id).role === 'owner') return send(res, 409, { code: 'owner', message: 'The agreement’s author can’t leave it.' });
-        // Rules that were only waiting on this member come into effect; in a binding agreement, mail their certificates.
-        const waiting = q.ledger.get(lid).binding_since ? q.entries.all(lid).filter(e => !allSigned(lid, e.id)) : [];
+        // Rules that were only waiting on this member come into effect, and everyone gets the agreement as it now stands.
+        const waiting = q.entries.all(lid).filter(e => !isComplete(lid, e.id));
         q.leave.run(lid, me.id);
-        for (const e of waiting) mailIfComplete(lid, e.id);
+        for (const e of waiting) announceIfComplete(lid, e.id);
         return send(res, 200, { ok: true });
       }
 
@@ -864,14 +1125,10 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && parts[3] === 'code' && parts.length === 4) {
         const l = q.ledger.get(lid);
         if (!l.binding_since || !l.verify_email) return send(res, 409, { code: 'not_needed', message: 'This agreement doesn’t ask for codes.' });
-        const { purpose } = await readBody(req);
-        if (!/^(ledger|entry:[A-Za-z0-9_-]{6,64})$/.test(String(purpose))) return send(res, 400, { code: 'invalid_argument', message: 'Bad purpose.' });
         if (!allow('code:' + me.id, 6, 10 * 60e3)) return send(res, 429, { code: 'rate_limited', message: 'That’s a lot of codes. Wait a few minutes.' });
         const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
-        q.setCode.run(me.id, lid, purpose, digest(me.id + ':' + code), later(CODE_MINUTES / 1440));
-        const what = purpose === 'ledger' ? `sign the agreement “${l.name}”` : `sign a rule in “${l.name}”`;
-        const sent = await sendMail({ to: [me.email], subject: `Your Handshake signing code: ${code}`,
-          text: `Your code to ${what} is ${code}. It expires in ${CODE_MINUTES} minutes. If you didn’t ask for it, ignore this email.` });
+        q.setCode.run(me.id, lid, 'signing', digest(me.id + ':' + code), later(CODE_MINUTES / 1440));
+        const sent = await sendMail(codeEmail(me, l, code));
         if (!sent) return send(res, 502, { code: 'mail_failed', message: 'The code email couldn’t be sent. Try again, or ask the agreement’s author to check the server’s email settings.' });
         return send(res, 200, { ok: true, to: me.email });
       }
@@ -884,15 +1141,12 @@ const server = http.createServer(async (req, res) => {
         const body = await readBody(req);
         const name = signatureFrom(body);
         if (!name) return send(res, 400, { code: 'invalid_argument', message: 'Type your full name and confirm that you intend to be legally bound.' });
-        const head = headOf(lid);
-        if (body.headHash !== head.hash) return send(res, 409, { code: 'stale', message: 'The agreement changed while you were reading it. Review it again before signing.' });
-        if (q.ledgerSig.get(lid, me.id)) return send(res, 200, { ok: true });
-        const bad = checkCode(l, me, 'ledger', body.code);
+        // Someone who already signed the agreement uses this to sign the rules waiting for them, all at once.
+        const already = !!q.ledgerSig.get(lid, me.id);
+        if (!already && body.headHash !== headOf(lid).hash) return send(res, 409, { code: 'stale', message: 'The agreement changed while you were reading it. Review it again before signing.' });
+        const bad = checkCode(l, me, req, body.code);
         if (bad) return send(res, 403, bad);
-        q.addLedgerSig.run(lid, me.id, now(), name, ledgerStatement(l, head.count, head.hash), head.hash, head.count, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || '');
-        sendMail({ to: [me.email], subject: `You signed the agreement “${l.name}”`,
-          text: `You signed the agreement “${l.name}” as “${name}”. Your copy of the agreement certificate is the HTML version of this email, and online at ${BASE_URL}/certificate/${lid}`,
-          html: certificateHtml(lid).html });
+        if (!already) signLedgerOnce(l, me, name, req);
         // The rules waiting for this signer can be signed in the same step (one code covers it); each still gets
         // its own signature, over its own fingerprint and statement.
         const signed = [];
@@ -901,8 +1155,9 @@ const server = http.createServer(async (req, res) => {
           if (!e || e.ledger_id !== lid || !h || it.entryHash !== h.hash || !neededFor(lid, eid).includes(me.id)) continue;
           const at = now();
           const added = tx(() => { const c = q.agree.run(eid, me.id, at).changes; if (c) q.addEntrySig.run(eid, me.id, at, name, entryStatement(l, h.seq, h.hash, JSON.parse(e.doc).effectiveOn), h.hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || ''); return c; });
-          if (added) { signed.push(eid); mailIfComplete(lid, eid); notifyLedger(lid, me, eid, true); }
+          if (added) { signed.push(eid); notifyLedger(lid, me, eid, true); announceIfComplete(lid, eid); }
         }
+        if (!already) announceAgreement(lid, me, true);
         return send(res, 201, { ok: true, signed: signed.length });
       }
 
@@ -922,9 +1177,8 @@ const server = http.createServer(async (req, res) => {
         q.addInvite.run(digest(t), lid, me.id, now(), exp);
         const sent = await sendMail({ to: [email], subject: `${me.name} invited you to “${l.name}” on Handshake`,
           text: `${me.name} (${me.email}) invited you to join the agreement “${l.name}” on Handshake, where you agree on rules together.\n\nJoin here: ${url}\n\nThe link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, ignore this email.`,
-          html: `<div style="font:16px/1.5 'Helvetica Neue',Helvetica,Arial,sans-serif;color:#000;max-width:32rem"><p>${escHtml(me.name)} (${escHtml(me.email)}) invited you to join the agreement <b>“${escHtml(l.name)}”</b> on Handshake, where you agree on rules together.</p>
-<p><a href="${escHtml(url)}" style="display:inline-block;background:#000;color:#fff;padding:11px 20px;border-radius:6px;text-decoration:none;font-weight:700">Join “${escHtml(l.name)}”</a></p>
-<p style="color:#53565a;font-size:14px">The link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, ignore this email.</p></div>` });
+          html: emailHtml({ heading: `${me.name} invited you to “${l.name}”`, intro: `${me.name} (${me.email}) invited you to join the agreement “${l.name}” on Handshake, where you agree on rules together.`,
+            button: { href: url, label: `Join “${l.name}”` }, note: `The link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, you can ignore this email.` }) });
         if (!sent) return send(res, 502, { code: 'mail_failed', message: 'The invite email couldn’t be sent. Copy the link instead.' });
         return send(res, 201, { ok: true, to: email });
       }
@@ -935,32 +1189,39 @@ const server = http.createServer(async (req, res) => {
         const { id, doc } = body;
         if (!ID_RE.test(String(id)) || !isPlainObject(doc)) return send(res, 400, { code: 'invalid_argument', message: 'Need an id and an entry.' });
         const l = q.ledger.get(lid);
-        // In a binding ledger, saving an entry is signing it.
-        let signer = null;
-        if (l.binding_since && !q.entry.get(id)) {
-          const block = bindingBlock(lid, me);
-          if (block) return send(res, 403, block);
-          signer = signatureFrom(body);
-          if (!signer) return send(res, 400, { code: 'invalid_argument', message: 'Type your full name and confirm that you intend to be legally bound.' });
-          const bad = checkCode(l, me, 'entry:' + id, body.code);
-          if (bad) return send(res, 403, bad);
-        }
         const existing = q.entry.get(id);
         if (existing) return existing.ledger_id === lid && existing.author_id === me.id ? send(res, 200, { ok: true })
           : send(res, 409, { code: 'invalid_argument', message: 'Entries cannot be changed once recorded.' });
         const clean = cleanDoc(doc, lid);
         if (clean.kind === 'rule' && !clean.text.trim()) return send(res, 400, { code: 'invalid_argument', message: 'The rule has no wording.' });
         if (clean.kind === 'repeal' && !clean.supersedes.length) return send(res, 400, { code: 'invalid_argument', message: 'Nothing to repeal.' });
-        const at = now(), required = q.members.all(lid).map(m => m.id);
+        // Withdrawing: only the author of a rule not everyone has agreed to yet. It needs no one else, and no signature.
+        if (clean.kind === 'withdraw') {
+          const t = clean.supersedes.length === 1 && q.entry.get(clean.supersedes[0]);
+          if (!t || t.author_id !== me.id || JSON.parse(t.doc).kind === 'withdraw') return send(res, 400, { code: 'invalid_argument', message: 'You can only withdraw a rule you wrote.' });
+          if (isComplete(lid, clean.supersedes[0])) return send(res, 409, { code: 'complete', message: 'Everyone has already agreed to it. Repeal it instead.' });
+        }
+        // In a binding agreement, saving an entry is signing it (and, the first time, signing the agreement too).
+        let signer = null;
+        if (l.binding_since && clean.kind !== 'withdraw') {
+          const block = bindingBlock(lid, me);
+          if (block) return send(res, 403, block);
+          signer = signatureFrom(body);
+          if (!signer) return send(res, 400, { code: 'invalid_argument', message: 'Type your full name and confirm that you intend to be legally bound.' });
+          const bad = checkCode(l, me, req, body.code);
+          if (bad) return send(res, 403, bad);
+        }
+        const at = now(), required = clean.kind === 'withdraw' ? [me.id] : q.members.all(lid).map(m => m.id);
         tx(() => {
+          if (signer) signLedgerOnce(l, me, signer, req);
           const e = { id, ledger_id: lid, author_id: me.id, created_at: at, required: JSON.stringify(required), doc: JSON.stringify(clean) };
           q.addEntry.run(e.id, e.ledger_id, e.author_id, e.created_at, e.required, e.doc);
           const hash = chainEntry(e);
           q.agree.run(id, me.id, at);
           if (signer) q.addEntrySig.run(id, me.id, at, signer, entryStatement(l, entryNumber(lid, id), hash, clean.effectiveOn), hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || '');
         });
-        if (signer) mailIfComplete(lid, id);
         notifyLedger(lid, me, id, false);
+        announceIfComplete(lid, id);
         return send(res, 201, { ok: true });
       }
 
@@ -970,7 +1231,7 @@ const server = http.createServer(async (req, res) => {
         if (!neededFor(lid, parts[4]).includes(me.id)) return send(res, 403, { code: 'forbidden', message: 'This entry doesn’t need your agreement on its own: it was already agreed when you joined, and agreeing to the whole agreement covers it.' });
         const l = q.ledger.get(lid);
         if (!l.binding_since) {
-          if (q.agree.run(parts[4], me.id, now()).changes) notifyLedger(lid, me, parts[4], true);
+          if (q.agree.run(parts[4], me.id, now()).changes) { notifyLedger(lid, me, parts[4], true); announceIfComplete(lid, parts[4]); }
           return send(res, 200, { ok: true });
         }
         // Binding: a signature over the exact text the signer was shown.
@@ -981,12 +1242,11 @@ const server = http.createServer(async (req, res) => {
         if (!name) return send(res, 400, { code: 'invalid_argument', message: 'Type your full name and confirm that you intend to be legally bound.' });
         const h = q.entryHash.get(parts[4]);
         if (!h || body.entryHash !== h.hash) return send(res, 409, { code: 'stale', message: 'This isn’t the exact text that was recorded. Reload and read it again before signing.' });
-        const bad = checkCode(l, me, 'entry:' + parts[4], body.code);
+        const bad = checkCode(l, me, req, body.code);
         if (bad) return send(res, 403, bad);
         const at = now();
-        const added = tx(() => { const c = q.agree.run(parts[4], me.id, at).changes; q.addEntrySig.run(parts[4], me.id, at, name, entryStatement(l, h.seq, h.hash, JSON.parse(e.doc).effectiveOn), h.hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || ''); return c; });
-        mailIfComplete(lid, parts[4]);
-        if (added) notifyLedger(lid, me, parts[4], true);
+        const added = tx(() => { signLedgerOnce(l, me, name, req); const c = q.agree.run(parts[4], me.id, at).changes; q.addEntrySig.run(parts[4], me.id, at, name, entryStatement(l, h.seq, h.hash, JSON.parse(e.doc).effectiveOn), h.hash, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || ''); return c; });
+        if (added) { notifyLedger(lid, me, parts[4], true); announceIfComplete(lid, parts[4]); }
         return send(res, 200, { ok: true });
       }
     }
