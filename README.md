@@ -65,9 +65,11 @@ email sent or failed is logged in the database. For Gmail, make an
 
 Handshake is an installable web app. In Chrome or Edge, use the install button in the
 address bar; on Android, "Add to Home screen"; on iPhone and iPad, Share › Add to Home Screen.
-Press **Turn on notifications** (next to your name) on each device that should hear when
-a rule in one of your ledgers is added, agreed to, signed or repealed. Whoever does it isn't
-notified. On iPhone and iPad this only works from the Home Screen app (iOS 16.4 or later).
+Once you're signed in, each device asks whether Handshake may send notifications (Firefox
+and Safari ask on your first click). Allow it to hear when a rule in one of your ledgers is
+added, agreed to, signed or repealed. Whoever does it isn't notified. To stop them, block
+notifications for the site in the browser's settings. On iPhone and iPad this only works from
+the Home Screen app (iOS 16.4 or later).
 
 Notifications go through the browsers' own push services (Web Push), so they need no account
 and cost nothing. The server makes its key pair on first run and keeps it in
