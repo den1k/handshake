@@ -454,8 +454,8 @@ async function askModel(prompt, res) {
 /* ---------- ledgers ---------- */
 const clientIp = req => String((TRUST_PROXY && String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '').slice(0, 64);
 const clientUa = req => String(req.headers['user-agent'] || '').slice(0, 300);
-const ledgerStatement = (l, count, head) => `I have read the rules recorded in the ledger “${l.name}” (${count} entr${count === 1 ? 'y' : 'ies'}, fingerprint ${head}). I intend to be legally bound by every rule in it that is in force, and by each rule I sign from now on${l.governing_law ? `, under ${l.governing_law}` : ''}. I am signing electronically.`;
-const entryStatement = (l, n, hash) => `I intend to be legally bound by § ${n} of the ledger “${l.name}” exactly as written (fingerprint ${hash})${l.governing_law ? `, under ${l.governing_law}` : ''}. I am signing electronically.`;
+const ledgerStatement = (l, count, head) => `I have read the rules recorded in the agreement “${l.name}” (${count} entr${count === 1 ? 'y' : 'ies'}, fingerprint ${head}). I intend to be legally bound by every rule in it that is in force, and by each rule I sign from now on${l.governing_law ? `, under ${l.governing_law}` : ''}. I am signing electronically.`;
+const entryStatement = (l, n, hash) => `I intend to be legally bound by § ${n} of the agreement “${l.name}” exactly as written (fingerprint ${hash})${l.governing_law ? `, under ${l.governing_law}` : ''}. I am signing electronically.`;
 // What a signature in a binding ledger must carry from the page.
 function signatureFrom(body) {
   const name = typeof body.typedName === 'string' ? body.typedName.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
@@ -465,7 +465,7 @@ function signatureFrom(body) {
 // Before signing anything in a binding ledger: consent to e-signatures, then sign the ledger itself.
 function bindingBlock(lid, me) {
   if (!q.consent.get(me.id, ESIGN_VERSION)) return { code: 'needs_consent', message: 'Accept the notice about electronic signatures first.' };
-  if (!q.ledgerSig.get(lid, me.id)) return { code: 'needs_ledger_signature', message: 'Sign the ledger before signing rules in it.' };
+  if (!q.ledgerSig.get(lid, me.id)) return { code: 'needs_ledger_signature', message: 'Sign the agreement before signing rules in it.' };
   return null;
 }
 const entryNumber = (lid, eid) => { const h = q.entryHash.get(eid); return h ? h.seq : 0; };
@@ -543,7 +543,7 @@ function cleanDoc(doc, lid) {
 /* ---------- certificates ---------- */
 function certificate(res, lid, eid) {
   const out = certificateHtml(lid, eid);
-  if (!out) return page(res, 404, 'Certificate not found', 'No such entry in this ledger.');
+  if (!out) return page(res, 404, 'Certificate not found', 'No such entry in this agreement.');
   res.writeHead(200, { ...SECURITY, 'content-security-policy': csp(token(12)), 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
   res.end(out.html);
 }
@@ -564,7 +564,7 @@ function certificateHtml(lid, eid) {
     title = `§ ${h.seq} · ${doc.title || 'Untitled'}`;
     body = `<p class="state ${done ? 'ok' : 'wait'}">${done ? 'Signed by every required member' : 'Not yet signed by every required member'}</p>
       <h2>Text as recorded</h2><blockquote>${e(doc.text)}</blockquote>
-      <dl><dt>Ledger</dt><dd>${e(l.name)}${l.governing_law ? ` · governing law: ${e(l.governing_law)}` : ''}</dd><dt>Written by</dt><dd>${e(who(ent.author_id).name)} &lt;${e(who(ent.author_id).email)}&gt;</dd>
+      <dl><dt>Agreement</dt><dd>${e(l.name)}${l.governing_law ? ` · governing law: ${e(l.governing_law)}` : ''}</dd><dt>Written by</dt><dd>${e(who(ent.author_id).name)} &lt;${e(who(ent.author_id).email)}&gt;</dd>
       <dt>Recorded</dt><dd>${when(ent.created_at)}</dd><dt>Entry fingerprint</dt><dd><code>${e(h.hash)}</code></dd><dt>Previous fingerprint</dt><dd><code>${e(h.prev_hash)}</code></dd></dl>
       <h2>Signatures</h2>${req.map(u => { const s = sigs.find(x => x.user_id === u); return s ? `<section>${audit(s)}<ul>${consentRows(u)}</ul></section>` : `<section><p><strong>${e(who(u).name)}</strong> hasn’t signed.</p></section>`; }).join('')}`;
   } else {
@@ -572,7 +572,7 @@ function certificateHtml(lid, eid) {
     title = l.name;
     body = `<p class="state ${l.binding_since ? 'ok' : 'wait'}">${l.binding_since ? `Legally binding since ${when(l.binding_since)}` : 'Not marked as legally binding'}</p>
       <dl><dt>Governing law</dt><dd>${e(l.governing_law || 'Not stated')}</dd><dt>Entries</dt><dd>${v.count}</dd><dt>Current fingerprint</dt><dd><code>${e(headOf(lid).hash)}</code></dd></dl>
-      <h2>Ledger signatures</h2>${members.map(m => { const s = sigs.find(x => x.user_id === m.id); return s ? `<section><p>Signed covering the first ${s.entry_count} entr${s.entry_count === 1 ? 'y' : 'ies'} (fingerprint <code>${e(s.head_hash)}</code>).</p>${audit(s)}<ul>${consentRows(m.id)}</ul></section>` : `<section><p><strong>${e(m.name)}</strong> hasn’t signed the ledger.</p></section>`; }).join('')}`;
+      <h2>Agreement signatures</h2>${members.map(m => { const s = sigs.find(x => x.user_id === m.id); return s ? `<section><p>Signed covering the first ${s.entry_count} entr${s.entry_count === 1 ? 'y' : 'ies'} (fingerprint <code>${e(s.head_hash)}</code>).</p>${audit(s)}<ul>${consentRows(m.id)}</ul></section>` : `<section><p><strong>${e(m.name)}</strong> hasn’t signed the agreement.</p></section>`; }).join('')}`;
   }
   return { html: `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Certificate · ${e(title)}</title>
 <style>body{margin:0;background:#f6f2ec;color:#2b2622;font:15px/1.55 Georgia,serif;padding:32px 16px}main{max-width:46rem;margin:0 auto;background:#fffdf9;border:1px solid #958879;border-radius:16px;padding:32px 36px}
@@ -581,7 +581,7 @@ dl{display:grid;grid-template-columns:10rem 1fr;gap:4px 16px;margin:8px 0}dt{col
 section{border-top:1px solid #e8dfd2;padding-top:12px;margin-top:12px}ul{font:13px system-ui,sans-serif;color:#4a423b;padding-left:18px}.state{font:600 14px system-ui,sans-serif}.ok{color:#4f6f5f}.wait{color:#7a4e1d}
 .integrity{font:13px system-ui,sans-serif;margin-top:28px;padding:10px 12px;border-radius:10px;background:${v.ok ? '#eef3ef' : '#fbeae4'}}@media print{body{background:#fff;padding:0}main{border:0}}</style>
 <main><p class="k">Handshake · certificate · generated ${when(now())}</p><h1>${e(title)}</h1>${body}
-<p class="integrity">${v.ok ? `Integrity check passed: all ${v.count} fingerprints in this ledger match their recorded content and order.` : `Integrity check FAILED at entry ${v.brokenAt}: the stored history doesn’t match its fingerprints.`}</p>
+<p class="integrity">${v.ok ? `Integrity check passed: all ${v.count} fingerprints in this agreement match their recorded content and order.` : `Integrity check FAILED at entry ${v.brokenAt}: the stored history doesn’t match its fingerprints.`}</p>
 <p class="k">Print this page or save it as a PDF to keep a copy.</p></main>` };
 }
 
@@ -646,6 +646,13 @@ const server = http.createServer(async (req, res) => {
     const me = currentUser(req);
     if (me) renewSession(req, res);
 
+    // Signed out, the bare address shows the landing page; anything with a query (?l=, ?invite=) goes to the app's own gate.
+    if (req.method === 'GET' && url.pathname === '/' && !me && !url.search) {
+      res.writeHead(200, { ...SECURITY, 'content-security-policy': csp(token(12)), 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        + fs.readFileSync(path.join(ROOT, 'landing.html'), 'utf8').replaceAll('%BASE_URL%', escHtml(BASE_URL)));
+      return;
+    }
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       const nonce = token(16);
       res.writeHead(200, { ...SECURITY, 'content-security-policy': csp(nonce), 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
@@ -683,8 +690,8 @@ const server = http.createServer(async (req, res) => {
       const inv = TOKEN_RE.test(parts[1]) ? q.invite.get(digest(parts[1])) : null;
       const open = inv && !inv.used_by && inv.expires_at >= now(), next = '/auth/google?next=' + encodeURIComponent(dest);
       const title = open ? `${inv.inviter} invited you to “${inv.ledger_name}”` : 'An invitation to Handshake';
-      const desc = open ? 'Join this ledger on Handshake to agree on its rules together. The link works once.'
-        : 'Ledgers of the rules and agreements between partners, housemates, family and friends.';
+      const desc = open ? 'Join this agreement on Handshake to agree on its rules together. The link works once.'
+        : 'Agreements between partners, housemates, family and friends: the rules everyone has agreed to, recorded and never erased.';
       const e = escHtml;
       res.writeHead(200, { ...SECURITY, 'content-security-policy': csp(token(12)), 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' });
       res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · Handshake</title>
@@ -700,7 +707,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && parts[0] === 'certificate' && (parts.length === 2 || parts.length === 3)) {
       if (!me) { res.writeHead(302, { ...SECURITY, location: '/auth/google?next=' + encodeURIComponent(url.pathname) }); res.end(); return; }
       const lid = parts[1];
-      if (!q.ledger.get(lid) || !q.member.get(lid, me.id)) return page(res, 404, 'Certificate not found', 'No such ledger, or you aren’t a member.');
+      if (!q.ledger.get(lid) || !q.member.get(lid, me.id)) return page(res, 404, 'Certificate not found', 'No such agreement, or you aren’t a member.');
       return certificate(res, lid, parts[2]);
     }
 
@@ -761,7 +768,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/ledgers') {
       const { name, binding, governingLaw } = await readBody(req);
       const n = typeof name === 'string' ? name.trim().slice(0, 80) : '';
-      if (!n) return send(res, 400, { code: 'invalid_argument', message: 'Give the ledger a name.' });
+      if (!n) return send(res, 400, { code: 'invalid_argument', message: 'Give the agreement a name.' });
       const law = typeof governingLaw === 'string' ? governingLaw.trim().slice(0, 120) : '';
       const id = token(9), at = now();
       tx(() => { q.addLedger.run(id, n, me.id, at, binding === true ? at : '', law); q.addMember.run(id, me.id, 'owner', at); });
@@ -770,30 +777,30 @@ const server = http.createServer(async (req, res) => {
 
     if (parts[0] === 'api' && parts[1] === 'ledgers' && parts[2]) {
       const lid = parts[2];
-      if (!q.ledger.get(lid) || !q.member.get(lid, me.id)) return send(res, 404, { code: 'not_found', message: 'No such ledger, or you aren’t a member.' });
+      if (!q.ledger.get(lid) || !q.member.get(lid, me.id)) return send(res, 404, { code: 'not_found', message: 'No such agreement, or you aren’t a member.' });
 
       if (req.method === 'GET' && parts.length === 3) return send(res, 200, ledgerState(lid, me));
       if (req.method === 'GET' && parts[3] === 'verify' && parts.length === 4) return send(res, 200, verifyLedger(lid));
 
       // Settings: only the author can make a ledger binding (one way) or set its governing law.
       if (req.method === 'POST' && parts[3] === 'settings' && parts.length === 4) {
-        if (q.member.get(lid, me.id).role !== 'owner') return send(res, 403, { code: 'forbidden', message: 'Only the ledger’s author can change its settings.' });
+        if (q.member.get(lid, me.id).role !== 'owner') return send(res, 403, { code: 'forbidden', message: 'Only the agreement’s author can change its settings.' });
         const { binding, governingLaw, verifyEmail } = await readBody(req);
         const l = q.ledger.get(lid);
         if (typeof verifyEmail === 'boolean') q.setVerify.run(verifyEmail ? 1 : 0, lid);
         const law = typeof governingLaw === 'string' ? governingLaw.trim().slice(0, 120) : l.governing_law;
         if (binding === true && !l.binding_since) q.makeBinding.run(now(), law, lid);
         else if (law !== l.governing_law) {
-          if (l.binding_since && q.ledgerSigs.all(lid).length) return send(res, 409, { code: 'locked', message: 'The governing law can’t change once someone has signed the ledger.' });
+          if (l.binding_since && q.ledgerSigs.all(lid).length) return send(res, 409, { code: 'locked', message: 'The governing law can’t change once someone has signed the agreement.' });
           q.setLaw.run(law, lid);
         }
-        if (binding === false && l.binding_since) return send(res, 409, { code: 'locked', message: 'A legally binding ledger can’t be made non-binding.' });
+        if (binding === false && l.binding_since) return send(res, 409, { code: 'locked', message: 'A legally binding agreement can’t be made non-binding.' });
         return send(res, 200, { ok: true });
       }
 
       // Leaving: members only (the author stays). Past signatures and agreements stay on record.
       if (req.method === 'POST' && parts[3] === 'leave' && parts.length === 4) {
-        if (q.member.get(lid, me.id).role === 'owner') return send(res, 409, { code: 'owner', message: 'The ledger’s author can’t leave it.' });
+        if (q.member.get(lid, me.id).role === 'owner') return send(res, 409, { code: 'owner', message: 'The agreement’s author can’t leave it.' });
         q.leave.run(lid, me.id);
         return send(res, 200, { ok: true });
       }
@@ -801,35 +808,35 @@ const server = http.createServer(async (req, res) => {
       // A six-digit code for one signature, emailed to the signer's Google address.
       if (req.method === 'POST' && parts[3] === 'code' && parts.length === 4) {
         const l = q.ledger.get(lid);
-        if (!l.binding_since || !l.verify_email) return send(res, 409, { code: 'not_needed', message: 'This ledger doesn’t ask for codes.' });
+        if (!l.binding_since || !l.verify_email) return send(res, 409, { code: 'not_needed', message: 'This agreement doesn’t ask for codes.' });
         const { purpose } = await readBody(req);
         if (!/^(ledger|entry:[A-Za-z0-9_-]{6,64})$/.test(String(purpose))) return send(res, 400, { code: 'invalid_argument', message: 'Bad purpose.' });
         if (!allow('code:' + me.id, 6, 10 * 60e3)) return send(res, 429, { code: 'rate_limited', message: 'That’s a lot of codes. Wait a few minutes.' });
         const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
         q.setCode.run(me.id, lid, purpose, digest(me.id + ':' + code), later(CODE_MINUTES / 1440));
-        const what = purpose === 'ledger' ? `sign the ledger “${l.name}”` : `sign a rule in “${l.name}”`;
+        const what = purpose === 'ledger' ? `sign the agreement “${l.name}”` : `sign a rule in “${l.name}”`;
         const sent = await sendMail({ to: [me.email], subject: `Your Handshake signing code: ${code}`,
           text: `Your code to ${what} is ${code}. It expires in ${CODE_MINUTES} minutes. If you didn’t ask for it, ignore this email.` });
-        if (!sent) return send(res, 502, { code: 'mail_failed', message: 'The code email couldn’t be sent. Try again, or ask the ledger’s author to check the server’s email settings.' });
+        if (!sent) return send(res, 502, { code: 'mail_failed', message: 'The code email couldn’t be sent. Try again, or ask the agreement’s author to check the server’s email settings.' });
         return send(res, 200, { ok: true, to: me.email });
       }
 
       // Signing the whole ledger: the exact history the signer saw (its head fingerprint) must still be current.
       if (req.method === 'POST' && parts[3] === 'sign' && parts.length === 4) {
         const l = q.ledger.get(lid);
-        if (!l.binding_since) return send(res, 409, { code: 'not_binding', message: 'This ledger isn’t legally binding.' });
+        if (!l.binding_since) return send(res, 409, { code: 'not_binding', message: 'This agreement isn’t legally binding.' });
         if (!q.consent.get(me.id, ESIGN_VERSION)) return send(res, 403, { code: 'needs_consent', message: 'Accept the notice about electronic signatures first.' });
         const body = await readBody(req);
         const name = signatureFrom(body);
         if (!name) return send(res, 400, { code: 'invalid_argument', message: 'Type your full name and confirm that you intend to be legally bound.' });
         const head = headOf(lid);
-        if (body.headHash !== head.hash) return send(res, 409, { code: 'stale', message: 'The ledger changed while you were reading it. Review it again before signing.' });
+        if (body.headHash !== head.hash) return send(res, 409, { code: 'stale', message: 'The agreement changed while you were reading it. Review it again before signing.' });
         if (q.ledgerSig.get(lid, me.id)) return send(res, 200, { ok: true });
         const bad = checkCode(l, me, 'ledger', body.code);
         if (bad) return send(res, 403, bad);
         q.addLedgerSig.run(lid, me.id, now(), name, ledgerStatement(l, head.count, head.hash), head.hash, head.count, me.email, clientIp(req), clientUa(req), methodOf(l), me.authAt || '');
-        sendMail({ to: [me.email], subject: `You signed the ledger “${l.name}”`,
-          text: `You signed the ledger “${l.name}” as “${name}”. Your copy of the ledger certificate is the HTML version of this email, and online at ${BASE_URL}/certificate/${lid}`,
+        sendMail({ to: [me.email], subject: `You signed the agreement “${l.name}”`,
+          text: `You signed the agreement “${l.name}” as “${name}”. Your copy of the agreement certificate is the HTML version of this email, and online at ${BASE_URL}/certificate/${lid}`,
           html: certificateHtml(lid).html });
         return send(res, 201, { ok: true });
       }
@@ -849,8 +856,8 @@ const server = http.createServer(async (req, res) => {
         const l = q.ledger.get(lid), t = token(), exp = later(INVITE_DAYS), url = `${BASE_URL}/invite/${t}`;
         q.addInvite.run(digest(t), lid, me.id, now(), exp);
         const sent = await sendMail({ to: [email], subject: `${me.name} invited you to “${l.name}” on Handshake`,
-          text: `${me.name} (${me.email}) invited you to join the ledger “${l.name}” on Handshake, where you agree on rules together.\n\nJoin here: ${url}\n\nThe link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, ignore this email.`,
-          html: `<div style="font:16px/1.5 Georgia,serif;color:#2b2622;max-width:32rem"><p>${escHtml(me.name)} (${escHtml(me.email)}) invited you to join the ledger <b>“${escHtml(l.name)}”</b> on Handshake, where you agree on rules together.</p>
+          text: `${me.name} (${me.email}) invited you to join the agreement “${l.name}” on Handshake, where you agree on rules together.\n\nJoin here: ${url}\n\nThe link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, ignore this email.`,
+          html: `<div style="font:16px/1.5 Georgia,serif;color:#2b2622;max-width:32rem"><p>${escHtml(me.name)} (${escHtml(me.email)}) invited you to join the agreement <b>“${escHtml(l.name)}”</b> on Handshake, where you agree on rules together.</p>
 <p><a href="${escHtml(url)}" style="display:inline-block;background:#2b2622;color:#fffdf9;padding:10px 18px;border-radius:999px;text-decoration:none;font-family:system-ui,sans-serif">Join “${escHtml(l.name)}”</a></p>
 <p style="color:#6b6158;font-size:14px">The link works once, for ${INVITE_DAYS} days. You’ll sign in with Google. If you weren’t expecting this, ignore this email.</p></div>` });
         if (!sent) return send(res, 502, { code: 'mail_failed', message: 'The invite email couldn’t be sent. Copy the link instead.' });
@@ -922,9 +929,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/check') {
       const { prompt } = await readBody(req);
       if (typeof prompt !== 'string' || !prompt.trim()) return send(res, 400, { code: 'invalid_request', message: 'Empty prompt' });
-      if (prompt.length > MAX_PROMPT) return send(res, 413, { code: 'invalid_request', message: 'The rule and ledger are too long to check in one go.' });
+      if (prompt.length > MAX_PROMPT) return send(res, 413, { code: 'invalid_request', message: 'The rule and agreement are too long to check in one go.' });
       // Checks spend the server's API credit: only for members of a ledger, and a few per minute each.
-      if (!q.myLedgers.all(me.id).length) return send(res, 403, { code: 'forbidden', message: 'Join or create a ledger first.' });
+      if (!q.myLedgers.all(me.id).length) return send(res, 403, { code: 'forbidden', message: 'Join or create an agreement first.' });
       if (!allow('c:' + me.id, 20, 10 * 60e3)) return send(res, 429, { code: 'rate_limited', message: 'That’s a lot of checks in a short time. Wait a few minutes and try again.' });
       try {
         const text = await askModel(prompt, res);

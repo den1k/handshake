@@ -1,0 +1,199 @@
+<title>Handshake</title>
+<meta name="description" content="Agreements between partners, housemates, family and friends: the rules everyone has agreed to, recorded and never erased.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Handshake">
+<meta property="og:title" content="Handshake">
+<meta property="og:description" content="Agreements between partners, housemates, family and friends: the rules everyone has agreed to, recorded and never erased.">
+<meta property="og:url" content="%BASE_URL%/">
+<meta property="og:image" content="%BASE_URL%/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#f6f2ec">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,400..600,50&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;1,8..60,400&family=Figtree:wght@400;500;600&display=swap">
+<style>
+/* Handshake's landing page, shown at / to anyone signed out. Same paper, ink and sage as the app. */
+:root {
+  --ground: #f6f2ec; --page: #fffdf9; --tint: #f4eee5; --ink: #2b2622; --ink-2: #4a423b; --muted: #6b625a;
+  --rule: #ddd2c3; --chain: #d4c7b5; --accent: #4f6f5f; --accent-tint: #e7eee9; --on-accent: #fffdf9;
+  --f-display: Fraunces, Georgia, serif; --f-text: "Source Serif 4", Georgia, serif; --f-ui: Figtree, system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --ground: #1c1916; --page: #24201c; --tint: #2f2a24; --ink: #efe8de; --ink-2: #d3c9bb; --muted: #b3a89a;
+    --rule: #463e35; --chain: #554b40; --accent: #9cbcaa; --accent-tint: #2e3a33; --on-accent: #1c1916; }
+}
+* { box-sizing: border-box; }
+html { background: var(--ground); }
+body { margin: 0; color: var(--ink); background: var(--ground); font: 400 1.0625rem/1.6 var(--f-ui); -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+.sheet { max-width: 68rem; margin: 1rem auto; background: var(--page); border: 1px solid var(--rule); border-radius: 28px;
+  outline: 1px solid var(--rule); outline-offset: 6px; overflow: hidden; }
+@media (min-width: 720px) { .sheet { margin: 1.75rem auto; } }
+.wrap { padding: 0 clamp(1.25rem, 5vw, 4rem); }
+.chain { height: 12px; margin: 0 clamp(1.25rem, 5vw, 4rem);
+  background: radial-gradient(circle at 6px 6px, transparent 3.4px, var(--chain) 3.9px, var(--chain) 5.2px, transparent 5.7px) 0 0 / 15px 12px repeat-x; }
+
+header.top { display: flex; align-items: center; justify-content: space-between; padding-top: 1.4rem; padding-bottom: 1.4rem; }
+.brand { display: flex; align-items: center; gap: .6rem; font: 500 1.5rem/1 var(--f-display); text-decoration: none; }
+.brand svg { width: 2.1rem; height: 1.35rem; }
+.btn { display: inline-flex; align-items: center; gap: .55rem; font: 600 .98rem/1 var(--f-ui); text-decoration: none; border-radius: 999px;
+  padding: .85rem 1.35rem; border: 1px solid var(--ink); color: var(--ink); background: transparent; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.small { padding: .55rem 1rem; font-size: .9rem; }
+.btn svg { width: 1.05rem; height: 1.05rem; }
+
+/* Hero: the promise on the left, a rule coming into force on the right. */
+.hero { display: grid; gap: 2.5rem; padding-top: clamp(1.5rem, 5vw, 3.5rem); padding-bottom: clamp(2.5rem, 6vw, 4.5rem); align-items: center; }
+@media (min-width: 880px) { .hero { grid-template-columns: 1.05fr 1fr; gap: 3.5rem; } }
+h1 { margin: 0; font: 500 clamp(2.6rem, 6.4vw, 4.4rem)/1.02 var(--f-display); letter-spacing: -.02em; font-variation-settings: "SOFT" 50; }
+.lede { margin: 1.3rem 0 2rem; max-width: 34ch; font: 400 1.25rem/1.5 var(--f-text); color: var(--ink-2); }
+
+.entry { margin: 0; background: var(--ground); border: 1px solid var(--rule); border-radius: 20px; padding: 1.4rem 1.5rem 1.2rem; }
+.entry-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; color: var(--muted); font-size: .9rem; }
+.entry-head b { font: 500 1.05rem var(--f-display); color: var(--ink); }
+.entry blockquote { margin: 1rem 0 1.2rem; font: 400 1.5rem/1.35 var(--f-text); }
+.entry blockquote span { color: var(--muted); font: 500 1.1rem var(--f-display); margin-right: .4rem; }
+.who { list-style: none; margin: 0; padding: .9rem 0 0; border-top: 1px solid var(--rule); display: grid; gap: .45rem; font-size: .95rem; }
+.who li { display: flex; align-items: center; gap: .6rem; }
+.who time, .who .wait { margin-left: auto; color: var(--muted); font-size: .88rem; }
+.swap { margin-left: auto; display: grid; justify-items: end; }
+.swap > * { grid-area: 1 / 1; }
+.ring { width: 1.05rem; height: 1.05rem; border-radius: 50%; border: 2px solid var(--accent); flex: none; }
+.ring.on { background: var(--accent); }
+.status { margin-top: 1rem; display: flex; align-items: center; gap: .6rem; font-weight: 600; font-size: .95rem; position: relative; height: 1.6rem; }
+.status span { position: absolute; left: 0; display: flex; align-items: center; gap: .55rem; }
+.status .now { color: var(--accent); }
+.status .now svg { width: 1.9rem; height: 1.2rem; }
+.status .before { color: var(--muted); font-weight: 500; }
+
+/* The one moment: Dennis agrees, and the rule comes into force. */
+.late .ring { animation: fill .5s ease 1.4s both; }
+.late time { animation: show .4s ease 1.5s both; }
+.late .wait { animation: hide .3s ease 1.3s both; }
+.status .before { animation: hide .3s ease 1.6s both; }
+.status .now { animation: show .5s ease 1.8s both; }
+.status .now circle + circle { animation: clasp .7s cubic-bezier(.3, 1.4, .5, 1) 1.8s both; }
+@keyframes fill { from { background: transparent; } to { background: var(--accent); } }
+@keyframes show { from { opacity: 0; } to { opacity: 1; } }
+@keyframes hide { from { opacity: 1; } to { opacity: 0; } }
+@keyframes clasp { from { transform: translateX(9px); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .late *, .status * { animation-duration: 0s !important; animation-delay: 0s !important; } }
+
+/* Where people use it */
+.uses { display: grid; gap: 2.5rem 3.5rem; padding-top: clamp(2.5rem, 6vw, 4rem); padding-bottom: clamp(2.5rem, 6vw, 4rem); }
+@media (min-width: 760px) { .uses { grid-template-columns: 1fr 1fr; } }
+h2 { margin: 0 0 .4rem; font: 500 clamp(1.7rem, 3.2vw, 2.1rem)/1.15 var(--f-display); letter-spacing: -.01em; }
+.uses > div > p { margin: 0 0 1.2rem; color: var(--muted); }
+.examples { list-style: none; margin: 0; padding: 0; }
+.examples li { padding: .95rem 0; border-top: 1px solid var(--rule); display: grid; grid-template-columns: 9.5rem 1fr; gap: .2rem 1rem; }
+.examples li:last-child { border-bottom: 1px solid var(--rule); }
+.examples b { font-weight: 600; font-size: .95rem; padding-top: .15rem; }
+.examples q { font: italic 400 1.08rem/1.45 var(--f-text); color: var(--ink-2); quotes: "“" "”"; }
+.examples small { grid-column: 2; color: var(--accent); font-weight: 600; font-size: .82rem; display: flex; align-items: center; gap: .35rem; }
+.examples small svg { width: .9rem; height: .9rem; fill: none; stroke: currentColor; stroke-width: 1.6; }
+@media (max-width: 480px) { .examples li { grid-template-columns: 1fr; } .examples small { grid-column: 1; } }
+
+/* How it works: a real sequence, so it's numbered. */
+.how { background: var(--tint); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+  padding-top: clamp(2.5rem, 6vw, 4rem); padding-bottom: clamp(2.5rem, 6vw, 4rem); }
+.steps { list-style: none; margin: 1.6rem 0 0; padding: 0; display: grid; gap: 1.8rem 2.2rem; counter-reset: step; }
+@media (min-width: 640px) { .steps { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 980px) { .steps { grid-template-columns: repeat(4, 1fr); } }
+.steps li { counter-increment: step; }
+.steps li::before { content: "§ " counter(step); display: block; font: 500 1.05rem var(--f-display); color: var(--accent); margin-bottom: .45rem; }
+.steps b { display: block; font: 500 1.25rem/1.25 var(--f-display); margin-bottom: .3rem; }
+.steps p { margin: 0; color: var(--ink-2); font-size: .98rem; }
+
+.close { padding-top: clamp(2.5rem, 6vw, 4rem); padding-bottom: clamp(2.5rem, 6vw, 4rem); display: grid; gap: 2rem; align-items: end; }
+@media (min-width: 820px) { .close { grid-template-columns: 1.4fr 1fr; } }
+.close p { margin: .4rem 0 0; max-width: 52ch; color: var(--ink-2); }
+.close .cta { display: flex; flex-direction: column; align-items: flex-start; gap: .7rem; }
+@media (min-width: 820px) { .close .cta { align-items: flex-end; } }
+.close .cta span { color: var(--muted); font-size: .9rem; }
+footer { padding-top: 1.2rem; padding-bottom: 1.6rem; color: var(--muted); font-size: .88rem; }
+</style>
+
+<div class="sheet">
+  <header class="top wrap">
+    <a class="brand" href="/" aria-label="Handshake"><svg viewBox="0 0 34 22" aria-hidden="true"><g fill="none" stroke="var(--accent)" stroke-width="2.2"><circle cx="11" cy="11" r="8.5"/><circle cx="23" cy="11" r="8.5"/></g></svg>Handshake</a>
+    <a class="btn small" href="/auth/google">Sign in</a>
+  </header>
+  <div class="chain" aria-hidden="true"></div>
+
+  <section class="hero wrap">
+    <div>
+      <h1>Agree on the rules. Keep them on record.</h1>
+      <p class="lede">Handshake keeps the agreements you make with the people in your life and work: what you agreed, who agreed, and when.</p>
+      <a class="btn primary" href="/auth/google"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z"/><path fill="currentColor" opacity=".8" d="M12 22c2.7 0 5-.9 6.6-2.5l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z"/><path fill="currentColor" opacity=".6" d="M6.4 13.9a6 6 0 0 1 0-3.8V7.5H3.1a10 10 0 0 0 0 9z"/><path fill="currentColor" opacity=".9" d="M12 6c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z"/></svg>Sign in with Google</a>
+    </div>
+
+    <figure class="entry" aria-label="Example: a rule in a Chores agreement, agreed by both members">
+      <div class="entry-head"><b>Chores</b><span>Lucy and Dennis</span></div>
+      <blockquote><span>§ 4</span>Whoever cooks doesn’t wash up.</blockquote>
+      <ul class="who">
+        <li><i class="ring on"></i>Lucy <time>Agreed 12 Mar, 19:04</time></li>
+        <li class="late"><i class="ring"></i>Dennis <span class="swap"><span class="wait">Hasn’t agreed yet</span><time>Agreed 12 Mar, 21:30</time></span></li>
+      </ul>
+      <div class="status">
+        <span class="before">Waiting for Dennis</span>
+        <span class="now"><svg viewBox="0 0 34 22" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.6"><circle cx="11" cy="11" r="8.5"/><circle cx="23" cy="11" r="8.5"/></g></svg>In force</span>
+      </div>
+    </figure>
+  </section>
+
+  <div class="chain" aria-hidden="true"></div>
+
+  <section class="uses wrap">
+    <div>
+      <h2>At home</h2>
+      <p>For partners, housemates and family: settle it once, stop re-arguing it.</p>
+      <ul class="examples">
+        <li><b>Chores</b><q>Whoever cooks doesn’t wash up.</q></li>
+        <li><b>Money</b><q>We talk before any purchase over €200.</q></li>
+        <li><b>Screens</b><q>No phones at the dinner table, adults included.</q></li>
+        <li><b>Guests</b><q>Overnight guests get a day’s notice.</q></li>
+      </ul>
+    </div>
+    <div>
+      <h2>At work</h2>
+      <p>For co-founders, partners and freelancers: decisions in writing, signed when it matters.</p>
+      <ul class="examples">
+        <li><b>Co-founders</b><q>Hiring decisions need both founders.</q></li>
+        <li><b>Studio</b><q>Client work over three days is quoted in writing.</q></li>
+        <li><b>Equity</b><q>Shares vest over four years with a one-year cliff.</q><small><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 4v4c0 3.3 2.4 5.6 5.5 6.5 3.1-.9 5.5-3.2 5.5-6.5V4z"/></svg>Legally binding</small></li>
+        <li><b>Freelance terms</b><q>Invoices are paid within 14 days.</q><small><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 4v4c0 3.3 2.4 5.6 5.5 6.5 3.1-.9 5.5-3.2 5.5-6.5V4z"/></svg>Legally binding</small></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="how wrap">
+    <h2>How it works</h2>
+    <ol class="steps">
+      <li><b>Write a rule</b><p>In plain words, inside an agreement on one topic.</p></li>
+      <li><b>Check it</b><p>Handshake points out rules it clashes with and cases you haven’t covered.</p></li>
+      <li><b>Everyone agrees</b><p>It comes into force once every member has agreed.</p></li>
+      <li><b>It stays</b><p>Nothing is edited or erased. A new rule replaces an old one, and the history is kept.</p></li>
+    </ol>
+  </section>
+
+  <section class="close wrap">
+    <div>
+      <h2>When it has to hold up</h2>
+      <p>Make an agreement legally binding: everyone signs with their typed name, each signature is tied to a fingerprint of the exact text, and every rule gets a printable certificate with the full audit trail.</p>
+    </div>
+    <div class="cta">
+      <a class="btn primary" href="/auth/google">Start an agreement</a>
+      <span>Sign in with Google, then invite the others.</span>
+    </div>
+  </section>
+
+  <div class="chain" aria-hidden="true"></div>
+  <footer class="wrap">Handshake keeps every agreement as a ledger: added to, never erased.</footer>
+</div>

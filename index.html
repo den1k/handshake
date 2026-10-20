@@ -3,11 +3,11 @@
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#f6f2ec">
-<meta name="description" content="Ledgers of the rules and agreements between partners, housemates, family and friends. Agreed by everyone, recorded, never erased.">
+<meta name="description" content="Agreements between partners, housemates, family and friends: the rules everyone has agreed to, recorded and never erased.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Handshake">
 <meta property="og:title" content="Handshake">
-<meta property="og:description" content="Ledgers of the rules and agreements between partners, housemates, family and friends. Agreed by everyone, recorded, never erased.">
+<meta property="og:description" content="Agreements between partners, housemates, family and friends: the rules everyone has agreed to, recorded and never erased.">
 <meta property="og:url" content="%BASE_URL%/">
 <meta property="og:image" content="%BASE_URL%/og.png">
 <meta property="og:image:width" content="1200">
@@ -29,7 +29,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..700,0..100;1,9..144,300..700,0..100&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Figtree:wght@400;500;600&display=swap">
 <style>
 /* Layout: a warm, softly ornamented register. Linen ground, a framed page (a soft double rule); the
-   ledger is a grid (§ · recorded · rule · status) in pale warm rules, oldest first with the latest entry
+   agreement is a grid (§ · recorded · rule · status) in pale warm rules, oldest first with the latest entry
    at the bottom. Drafting happens inline as the next row: write the rule, press Check, and a fast model
    finds the rules it touches (the list narrows to them, clashing words marked) and suggests edge cases.
    Click any rule to see the rules connected to it, earlier and later.
@@ -453,9 +453,9 @@ textarea:focus, input:focus, select:focus { outline: 2px solid var(--accent); ou
 
   <div id="toolbar" class="toolbar" hidden>
     <div class="ledger-cell">
-      <label for="ledgerSel" class="sc">Ledger</label>
+      <label for="ledgerSel" class="sc">Agreement</label>
       <select id="ledgerSel" aria-label="Ledger"></select>
-      <button type="button" class="btn small" data-act="new-ledger">New ledger</button>
+      <button type="button" class="btn small" data-act="new-ledger">New agreement</button>
     </div>
     <div id="membersCell" class="members-cell"></div>
     <div class="settings-cell"><button type="button" class="btn small" data-act="settings" id="settingsBtn">Settings</button></div>
@@ -585,7 +585,7 @@ const signFields = (prefix, statement, purpose) => `<div class="sigbox">
     <label class="check"><input type="checkbox" id="${prefix}-intent"><span>I intend to be legally bound by this.</span></label>
     ${S.ledger && S.ledger.verifyEmail ? `<div class="field"><span class="lbl">Code from your email</span>
       <div class="row code-row"><input type="text" id="${prefix}-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 digits" aria-label="Code from your email"><button type="button" class="btn small" data-act="send-code" data-purpose="${esc(purpose)}" data-prefix="${esc(prefix)}">Email me a code</button></div>
-      <p class="hint" id="${prefix}-code-hint">This ledger confirms every signature with a code sent to ${esc(S.myEmail || 'your Google address')}.</p></div>` : ''}
+      <p class="hint" id="${prefix}-code-hint">This agreement confirms every signature with a code sent to ${esc(S.myEmail || 'your Google address')}.</p></div>` : ''}
   </div>`;
 // Keep what someone typed in a signature box across a re-render.
 const keepSigFields = prefix => { const n = $('#' + prefix + '-name'); return n ? { name: n.value, intent: $('#' + prefix + '-intent').checked, code: ($('#' + prefix + '-code') || {}).value || '' } : null; };
@@ -681,7 +681,7 @@ function renderLedger() {
   $('#ledger').classList.toggle('newest', S.newest);
   const head = $('#lhead'), bar = $('#filterbar'), rowsEl = $('#rows'), nextEl = $('#next'), foot = $('#lfoot');
   const only = h => { head.innerHTML = ''; bar.hidden = true; rowsEl.innerHTML = h; nextEl.innerHTML = ''; foot.innerHTML = ''; };
-  if (!S.loaded) return only(`<p class="notice">Opening the ledger…</p>`);
+  if (!S.loaded) return only(`<p class="notice">Opening the agreement…</p>`);
   if (!list.length) return only(drafting() ? '' : emptyHTML());
 
   const rel = related() || (S.focus ? { ids: connected(S.focus) || new Map(), focus: true } : null);
@@ -753,7 +753,7 @@ function agreementsHTML(r) {
   const people = r.required.map(u => {
     const at = r.agreed.get(u);
     const sig = sigOf(r.id, u);
-    return `<li class="${at ? 'yes' : 'no'}">${RINGS(at ? 'filled' : 'dashed')}<span class="who">${esc(firstName(u))}</span><span class="when">${at ? `<time datetime="${esc(at)}">${esc(fmtWhen(at))}</time>` : (binding() ? 'Not yet signed' : 'Not yet agreed')}</span>${sig ? `<span class="signed-as">Signed as “${esc(sig.typedName)}”</span>` : at && binding() ? '<span class="signed-as dim">Agreed before the ledger was binding</span>' : ''}</li>`;
+    return `<li class="${at ? 'yes' : 'no'}">${RINGS(at ? 'filled' : 'dashed')}<span class="who">${esc(firstName(u))}</span><span class="when">${at ? `<time datetime="${esc(at)}">${esc(fmtWhen(at))}</time>` : (binding() ? 'Not yet signed' : 'Not yet agreed')}</span>${sig ? `<span class="signed-as">Signed as “${esc(sig.typedName)}”</span>` : at && binding() ? '<span class="signed-as dim">Agreed before the agreement was binding</span>' : ''}</li>`;
   }).join('');
   const cert = binding() && r.hash ? `<li class="cert"><a href="/certificate/${esc(S.ledger.id)}/${esc(r.id)}" target="_blank" rel="noopener">Certificate</a><span class="dim">Fingerprint ${esc(shortHash(r.hash))}</span></li>` : '';
   return `<ul class="agreements" aria-label="${binding() ? 'Signatures' : 'Agreements'}">${people}${cert}</ul>`;
@@ -771,7 +771,7 @@ function rowHTML(r, rel, isLatest) {
   const mine = r.required.includes(S.me) && !r.agreed.has(S.me);
   if (!rel || rel.kind === 'focus') {
     if (mine && !past) actions.push(binding()
-      ? `<button type="button" class="btn small primary" data-act="${mySignedLedger() ? 'open-sign' : 'sign-ledger-view'}" data-id="${esc(r.id)}">${RINGS()}${mySignedLedger() ? `Agree and sign § ${fol(r.n)}` : 'Sign the ledger first'}</button>`
+      ? `<button type="button" class="btn small primary" data-act="${mySignedLedger() ? 'open-sign' : 'sign-ledger-view'}" data-id="${esc(r.id)}">${RINGS()}${mySignedLedger() ? `Agree and sign § ${fol(r.n)}` : 'Sign the agreement first'}</button>`
       : `<button type="button" class="btn small primary" data-act="agree" data-id="${esc(r.id)}">${RINGS()}Agree to § ${fol(r.n)}</button>`);
     if (r.status === 'force') {
       actions.push(`<button type="button" class="btn link" data-act="amend" data-id="${esc(r.id)}">Amend</button>`);
@@ -883,13 +883,13 @@ function renderComposer() {
 }
 
 const elapsed = () => T.started ? ((Date.now() - T.started) / 1000).toFixed(1) + 's' : '';
-const thinkingHTML = () => `<div class="thinking" role="status"><svg class="pen" viewBox="0 0 30 12" aria-hidden="true"><circle cx="10" cy="6" r="5"/><circle cx="20" cy="6" r="5"/></svg><span>Checking against the ledger…</span><span id="ai-elapsed" class="stats">${elapsed()}</span><button type="button" class="btn link" data-act="stop">Stop</button></div>`;
+const thinkingHTML = () => `<div class="thinking" role="status"><svg class="pen" viewBox="0 0 30 12" aria-hidden="true"><circle cx="10" cy="6" r="5"/><circle cx="20" cy="6" r="5"/></svg><span>Checking against the agreement…</span><span id="ai-elapsed" class="stats">${elapsed()}</span><button type="button" class="btn link" data-act="stop">Stop</button></div>`;
 
 function ruleHTML() {
   const amend = D.amending && L.byId.get(D.amending);
   const stale = D.checked && str(D.text) !== D.checkedText;
   let h = '';
-  if (amend) h += `<p class="banner">Amending § ${fol(amend.n)}, “${esc(str(amend.title))}”. When you save, § ${fol(amend.n)} is marked as replaced. It stays in the ledger.</p>`;
+  if (amend) h += `<p class="banner">Amending § ${fol(amend.n)}, “${esc(str(amend.title))}”. When you save, § ${fol(amend.n)} is marked as replaced. It stays in the agreement.</p>`;
 
   h += `<section class="step"><h3><span class="stepno">1</span>Write the rule</h3>
     <label class="field"><span class="lbl">Wording</span>
@@ -941,10 +941,10 @@ function conflictHTML(c) {
 
 function repealHTML() {
   const t = L.byId.get(D.supersedes[0]);
-  if (!t) return `<p class="hint">The rule you chose to repeal isn’t in the ledger.</p>`;
+  if (!t) return `<p class="hint">The rule you chose to repeal isn’t in the agreement.</p>`;
   return `<section class="step"><h3>§ ${fol(t.n)} · ${esc(str(t.title))}</h3>
     <p class="quoted">${marked(str(t.text))}</p>
-    <p class="hint">A repeal is its own ledger entry. § ${fol(t.n)} stays in the ledger, marked as repealed, and stops being in force.</p>
+    <p class="hint">A repeal is its own entry. § ${fol(t.n)} stays in the agreement, marked as repealed, and stops being in force.</p>
     <label class="field"><span class="lbl">Why, in a sentence (optional)</span><textarea id="d-reason" rows="3" placeholder="e.g. We hired a cleaner, so the rota no longer applies.">${esc(D.reason)}</textarea></label>
   </section>`;
 }
@@ -962,7 +962,7 @@ function renderFoot() {
     if (/\[[^\]\n]+\]/.test(D.text)) note.push('The wording still has [bracketed] blanks.');
     if (S.members.length > 1) note.push(`${binding() ? 'Saving signs it.' : 'Saving counts as your agreement.'} It comes into effect when ${listJoin(S.members.filter(m => m.id !== S.me).map(m => m.name.split(/\s+/)[0]))} ${binding() ? 'sign' : 'agree'}${S.members.length > 2 ? '' : 's'} too.`);
   }
-  if (binding() && !mySignedLedger()) block.push('This ledger is legally binding. Sign the ledger before writing rules in it.');
+  if (binding() && !mySignedLedger()) block.push('This agreement is legally binding. Sign the agreement before writing rules in it.');
   const disabled = block.length || T.saving || T.busy;
   const sign = binding() && mySignedLedger() ? signFields('ds', `I intend to be legally bound by this ${D.mode === 'repeal' ? 'repeal' : 'rule'} (§ ${fol(L.list.length + 1)} of “${S.ledger.name}”) exactly as written${S.ledger.governingLaw ? `, under ${S.ledger.governingLaw}` : ''}. I am signing electronically.`, 'new') : '';
   const keep = keepSigFields('ds');
@@ -971,7 +971,7 @@ function renderFoot() {
       <button type="button" class="btn link danger" data-act="discard">${T.discardArm ? 'Click again to discard' : 'Discard draft'}</button>
       <button type="button" class="btn primary" data-act="record"${disabled ? ' disabled' : ''}>${RINGS()}${T.saving ? 'Saving…' : `${binding() ? 'Sign and ' : ''}${D.mode === 'repeal' ? 'record repeal' : 'save'} as § ${fol(L.list.length + 1)}`.replace(/^./, c => c.toUpperCase())}</button>
     </div>
-    ${binding() && !mySignedLedger() ? `<button type="button" class="btn" data-act="sign-ledger-view">Review and sign the ledger</button>` : ''}`;
+    ${binding() && !mySignedLedger() ? `<button type="button" class="btn" data-act="sign-ledger-view">Review and sign the agreement</button>` : ''}`;
   restoreSigFields('ds', keep);
 }
 
@@ -979,7 +979,7 @@ function renderFoot() {
 function buildPrompt() {
   const force = inForce();
   const P = [];
-  P.push(`You help two or more people keep a ledger of rules they agree on. They might be partners, housemates, family, friends, business partners or any other group; take the setting from their words. Check one new rule against their ledger. Be neutral: don't judge whether the rule is a good idea.`);
+  P.push(`You help two or more people keep an agreement: the rules they have all accepted on one topic. They might be partners, housemates, family, friends, business partners or any other group; take the setting from their words. Check one new rule against their agreement. Be neutral: don't judge whether the rule is a good idea.`);
   P.push(`NEW RULE:\n"""\n${str(D.text).slice(0, 6000)}\n"""`);
   const rep = D.supersedes.map(id => L.byId.get(id)).filter(Boolean);
   if (rep.length) P.push(`This new rule is meant to replace ${rep.map(r => '§ ' + r.n).join(', ')}, so differences from it are expected; don't report it as a conflict.`);
@@ -1282,21 +1282,21 @@ function showGate(kind) {
     const v = S.invite;
     g.innerHTML = v.status === 'open'
       ? `<h2 class="soft">Join “${esc(v.ledgerName)}”?</h2>
-        <p>${esc(v.invitedBy)} invited you. Members see every rule in this ledger, and new rules need everyone’s agreement, yours included.</p>
-        <div class="row"><button type="button" class="btn primary" data-act="accept-invite">${RINGS()}Join ledger</button><button type="button" class="btn link" data-act="decline-invite">Not now</button></div>`
+        <p>${esc(v.invitedBy)} invited you. Members see every rule in this agreement, and new rules need everyone’s agreement, yours included.</p>
+        <div class="row"><button type="button" class="btn primary" data-act="accept-invite">${RINGS()}Join agreement</button><button type="button" class="btn link" data-act="decline-invite">Not now</button></div>`
       : `<h2 class="soft">${v.status === 'used' ? 'Invite already used' : v.status === 'expired' ? 'Invite expired' : 'Invite not found'}</h2>
         <p>${v.status === 'used' ? 'Each invite link works once.' : v.status === 'expired' ? 'Invite links last 7 days.' : 'This invite link isn’t valid.'} Ask ${v.invitedBy ? esc(v.invitedBy) : 'whoever sent it'} for a new one.</p>
-        <div class="row"><button type="button" class="btn" data-act="decline-invite">Go to my ledgers</button></div>`;
+        <div class="row"><button type="button" class="btn" data-act="decline-invite">Go to my agreements</button></div>`;
   } else if (kind === 'no-ledgers') {
-    g.innerHTML = `<h2 class="soft">Start your first ledger</h2>
-      <p>A ledger holds the rules for one group: a couple, a household, a business. You can invite the others once it exists.</p>
+    g.innerHTML = `<h2 class="soft">Start your first agreement</h2>
+      <p>An agreement holds the rules you share with others on one topic: chores, money, a business. You can invite the others once it exists.</p>
       ${newLedgerForm()}`;
     const i = $('#ledger-name'); if (i) i.focus();
   }
 }
 const newLedgerForm = () => `<div class="new-ledger">
-  <div class="row"><input type="text" id="ledger-name" maxlength="80" placeholder="e.g. Our flat, Studio partners" aria-label="Ledger name"><button type="button" class="btn primary" data-act="create-ledger">${RINGS()}Create ledger</button></div>
-  <label class="check"><input type="checkbox" id="ledger-binding"><span><strong>Legally binding</strong> · every member signs the ledger once and signs each rule with their typed name, with an audit trail and certificates. Can’t be undone.</span></label>
+  <div class="row"><input type="text" id="ledger-name" maxlength="80" placeholder="e.g. Chores, Money, Studio partnership" aria-label="Agreement name"><button type="button" class="btn primary" data-act="create-ledger">${RINGS()}Create agreement</button></div>
+  <label class="check"><input type="checkbox" id="ledger-binding"><span><strong>Legally binding</strong> · every member signs the agreement once and signs each rule with their typed name, with an audit trail and certificates. Can’t be undone.</span></label>
   <label class="field law"><span class="lbl">Governing law (optional)</span><input type="text" id="ledger-law" maxlength="120" placeholder="e.g. State of California"></label>
 </div>`;
 
@@ -1305,11 +1305,11 @@ function showPanel(kind, data) {
   if (!kind) { p.hidden = true; p.innerHTML = ''; return; }
   p.hidden = false;
   if (kind === 'new-ledger') {
-    p.innerHTML = `<div class="panel-head"><h3>New ledger</h3><button type="button" class="btn link" data-act="close-panel">Cancel</button></div>${newLedgerForm()}`;
+    p.innerHTML = `<div class="panel-head"><h3>New agreement</h3><button type="button" class="btn link" data-act="close-panel">Cancel</button></div>${newLedgerForm()}`;
     const i = $('#ledger-name'); if (i) i.focus();
   } else if (kind === 'invite') {
     p.innerHTML = `<div class="panel-head"><h3>Invite someone to ${esc(S.ledger.name)}</h3><button type="button" class="btn link" data-act="close-panel">Done</button></div>
-      <p class="hint">Send this link to one person. It works once, for ${esc(data.days)} days. They sign in with Google and join this ledger.</p>
+      <p class="hint">Send this link to one person. It works once, for ${esc(data.days)} days. They sign in with Google and join this agreement.</p>
       <div class="row"><input type="text" id="invite-url" readonly value="${esc(data.url)}" aria-label="Invite link"><button type="button" class="btn" data-act="copy-invite">Copy link</button></div>
       <p class="hint">Or email an invite. They get a link of their own, so this one stays free for someone else.</p>
       <div class="row"><input type="email" id="invite-email" placeholder="Their email address" autocomplete="off" aria-label="Email address to invite"><button type="button" class="btn" data-act="email-invite">Send invite</button></div>
@@ -1326,8 +1326,8 @@ function renderBindbar() {
   const unsigned = S.members.filter(m => !S.ledgerSigs.some(s => s.userId === m.id));
   b.className = 'bindbar' + (mySignedLedger() ? '' : ' todo');
   b.innerHTML = mySignedLedger()
-    ? `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 4v4c0 3.3 2.4 5.6 5.5 6.5 3.1-.9 5.5-3.2 5.5-6.5V4z"/></svg><p><strong>Legally binding</strong>${S.ledger.governingLaw ? ` · ${esc(S.ledger.governingLaw)}` : ''} · you signed the ledger ${esc(fmtWhen(S.ledgerSigs.find(s => s.userId === S.me).at))}${unsigned.length ? ` · <span class="dim">waiting for ${esc(listJoin(unsigned.map(m => firstName(m.id))))} to sign it</span>` : ''}</p><button type="button" class="btn link" data-act="settings">Details</button>`
-    : `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 4v4c0 3.3 2.4 5.6 5.5 6.5 3.1-.9 5.5-3.2 5.5-6.5V4z"/></svg><p><strong>This ledger is legally binding.</strong> Review and sign it before you sign any rules in it.</p><button type="button" class="btn primary small" data-act="sign-ledger-view">Review and sign</button>`;
+    ? `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 4v4c0 3.3 2.4 5.6 5.5 6.5 3.1-.9 5.5-3.2 5.5-6.5V4z"/></svg><p><strong>Legally binding</strong>${S.ledger.governingLaw ? ` · ${esc(S.ledger.governingLaw)}` : ''} · you signed the agreement ${esc(fmtWhen(S.ledgerSigs.find(s => s.userId === S.me).at))}${unsigned.length ? ` · <span class="dim">waiting for ${esc(listJoin(unsigned.map(m => firstName(m.id))))} to sign it</span>` : ''}</p><button type="button" class="btn link" data-act="settings">Details</button>`
+    : `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 2.5 4v4c0 3.3 2.4 5.6 5.5 6.5 3.1-.9 5.5-3.2 5.5-6.5V4z"/></svg><p><strong>This agreement is legally binding.</strong> Review and sign it before you sign any rules in it.</p><button type="button" class="btn primary small" data-act="sign-ledger-view">Review and sign</button>`;
 }
 function setView(v) {
   S.view = v;
@@ -1343,28 +1343,28 @@ function renderView() {
   const owner = S.members.some(m => m.id === S.me && m.role === 'owner');
   if (S.view === 'settings') {
     const sigFor = id => S.ledgerSigs.find(s => s.userId === id);
-    v.innerHTML = `<div class="view-head"><h2 class="soft">Settings · ${esc(S.ledger.name)}</h2><button type="button" class="btn link" data-act="back">Back to the ledger</button></div>
+    v.innerHTML = `<div class="view-head"><h2 class="soft">Settings · ${esc(S.ledger.name)}</h2><button type="button" class="btn link" data-act="back">Back to the agreement</button></div>
       <section class="card">
         <h3>Legally binding</h3>
-        ${binding() ? `<p>${RINGS('filled')} This ledger has been legally binding since ${esc(fmtWhen(S.ledger.bindingSince))}${S.ledger.governingLaw ? `, under ${esc(S.ledger.governingLaw)}` : ''}. It can’t be switched off: the signatures depend on it.</p>
-            <p class="hint">Every member accepts a notice about electronic signatures, signs the ledger once, then signs each new rule with their typed name. Each signature records the time, IP address and device, and the fingerprint of the exact text signed.</p>`
-          : owner ? `<label class="check"><input type="checkbox" id="set-binding"><span>Make this ledger legally binding</span></label>
-            <p class="hint">Every member will need to accept a notice about electronic signatures, sign the ledger once (covering the rules already in it), and sign each new rule. This can’t be undone.</p>
+        ${binding() ? `<p>${RINGS('filled')} This agreement has been legally binding since ${esc(fmtWhen(S.ledger.bindingSince))}${S.ledger.governingLaw ? `, under ${esc(S.ledger.governingLaw)}` : ''}. It can’t be switched off: the signatures depend on it.</p>
+            <p class="hint">Every member accepts a notice about electronic signatures, signs the agreement once, then signs each new rule with their typed name. Each signature records the time, IP address and device, and the fingerprint of the exact text signed.</p>`
+          : owner ? `<label class="check"><input type="checkbox" id="set-binding"><span>Make this agreement legally binding</span></label>
+            <p class="hint">Every member will need to accept a notice about electronic signatures, sign the agreement once (covering the rules already in it), and sign each new rule. This can’t be undone.</p>
             <label class="field"><span class="lbl">Governing law (optional)</span><input type="text" id="set-law" maxlength="120" placeholder="e.g. State of California" value="${esc(S.ledger.governingLaw || '')}"></label>
-            <div class="row"><button type="button" class="btn primary" data-act="save-settings">${RINGS()}Save settings</button><span class="hint">Saving with the box ticked makes the ledger binding for good.</span></div>`
-          : `<p>This ledger isn’t legally binding. Only its author can change that.</p>`}
+            <div class="row"><button type="button" class="btn primary" data-act="save-settings">${RINGS()}Save settings</button><span class="hint">Saving with the box ticked makes the agreement binding for good.</span></div>`
+          : `<p>This agreement isn’t legally binding. Only its author can change that.</p>`}
       </section>
       ${binding() ? `<section class="card"><h3>Confirming signatures</h3>
         ${owner ? `<label class="check"><input type="checkbox" id="set-verify"${S.ledger.verifyEmail ? ' checked' : ''}><span>Confirm every signature with a six-digit code emailed to the signer’s Google address</span></label>
           <div class="row"><button type="button" class="btn" data-act="save-verify">Save</button></div>`
           : `<p>${S.ledger.verifyEmail ? 'Every signature here is confirmed with a code emailed to the signer.' : 'Signatures here are confirmed by Google sign-in.'}</p>`}
         <p class="hint">Every signature’s certificate records how it was confirmed and when the signer last signed in with Google. ${S.mail === 'outbox' ? 'Email isn’t set up on this server yet, so codes and certificates are saved to its outbox instead of being sent.' : 'When everyone has signed a rule, each of you is emailed its certificate.'}</p></section>` : ''}
-      ${binding() ? `<section class="card"><h3>Ledger signatures</h3><ul class="sig-list">${S.members.map(m => { const s = sigFor(m.id); return `<li>${RINGS(s ? 'filled' : 'dashed')}<span class="who">${esc(m.name)}</span><span class="when">${s ? `Signed as “${esc(s.typedName)}”, ${esc(fmtWhen(s.at))}, covering ${s.entryCount} entr${s.entryCount === 1 ? 'y' : 'ies'}` : 'Hasn’t signed yet'}</span></li>`; }).join('')}</ul>
-        ${mySignedLedger() ? '' : `<div class="row"><button type="button" class="btn primary" data-act="sign-ledger-view">${RINGS()}Review and sign the ledger</button></div>`}
-        <p><a href="/certificate/${esc(S.ledger.id)}" target="_blank" rel="noopener">Ledger certificate</a> <span class="dim">· print it or save it as a PDF</span></p></section>` : ''}
-      ${owner ? '' : `<section class="card"><h3>Leave this ledger</h3><p class="hint">You’ll stop seeing it, and new rules won’t need you. Everything you’ve signed or agreed to stays on record.</p>
-        <div class="row"><button type="button" class="btn" data-act="leave">${T.leaveArm ? 'Click again to leave' : 'Leave ledger'}</button></div></section>`}
-      <section class="card"><h3>Integrity</h3><p id="integrity" class="hint">Checking the ledger’s fingerprints…</p>
+      ${binding() ? `<section class="card"><h3>Agreement signatures</h3><ul class="sig-list">${S.members.map(m => { const s = sigFor(m.id); return `<li>${RINGS(s ? 'filled' : 'dashed')}<span class="who">${esc(m.name)}</span><span class="when">${s ? `Signed as “${esc(s.typedName)}”, ${esc(fmtWhen(s.at))}, covering ${s.entryCount} entr${s.entryCount === 1 ? 'y' : 'ies'}` : 'Hasn’t signed yet'}</span></li>`; }).join('')}</ul>
+        ${mySignedLedger() ? '' : `<div class="row"><button type="button" class="btn primary" data-act="sign-ledger-view">${RINGS()}Review and sign the agreement</button></div>`}
+        <p><a href="/certificate/${esc(S.ledger.id)}" target="_blank" rel="noopener">Agreement certificate</a> <span class="dim">· print it or save it as a PDF</span></p></section>` : ''}
+      ${owner ? '' : `<section class="card"><h3>Leave this agreement</h3><p class="hint">You’ll stop seeing it, and new rules won’t need you. Everything you’ve signed or agreed to stays on record.</p>
+        <div class="row"><button type="button" class="btn" data-act="leave">${T.leaveArm ? 'Click again to leave' : 'Leave agreement'}</button></div></section>`}
+      <section class="card"><h3>Integrity</h3><p id="integrity" class="hint">Checking the agreement’s fingerprints…</p>
         <p class="hint">Current fingerprint <code>${esc(shortHash(S.ledger.head))}</code> over ${S.ledger.headCount} entr${S.ledger.headCount === 1 ? 'y' : 'ies'}.</p></section>`;
     api('GET', `/api/ledgers/${S.ledger.id}/verify`).then(r => { const el = $('#integrity'); if (el) el.innerHTML = r.ok
       ? `${RINGS('filled')} Every fingerprint matches its recorded content and order (${r.count} entr${r.count === 1 ? 'y' : 'ies'}).`
@@ -1372,14 +1372,14 @@ function renderView() {
   } else if (S.view === 'sign') {
     const keepLs = keepSigFields('ls'), keepConsent = $('#consent-box') && $('#consent-box').checked;
     const force = L.list.filter(r => r.status === 'force');
-    v.innerHTML = `<div class="view-head"><h2 class="soft">Sign “${esc(S.ledger.name)}”</h2><button type="button" class="btn link" data-act="back">Back to the ledger</button></div>
+    v.innerHTML = `<div class="view-head"><h2 class="soft">Sign “${esc(S.ledger.name)}”</h2><button type="button" class="btn link" data-act="back">Back to the agreement</button></div>
       ${S.consent && !S.consent.given ? `<section class="card"><h3>Electronic signatures</h3><p>${esc(S.consent.notice)}</p>
         <label class="check"><input type="checkbox" id="consent-box"><span>I agree to use electronic records and signatures.</span></label></section>` : ''}
       <section class="card"><h3>What you’re signing</h3>
         <p>${force.length ? `The ${force.length} rule${force.length === 1 ? '' : 's'} in force today, and every rule you sign from now on:` : 'There are no rules in force yet. Signing now covers every rule you sign from now on.'}</p>
         ${force.length ? `<ol class="sign-rules">${force.map(r => `<li><strong>§ ${fol(r.n)} · ${esc(str(r.title))}</strong><p>${marked(str(r.text))}</p></li>`).join('')}</ol>` : ''}
         ${signFields('ls', S.ledger.statement, 'ledger')}
-        <div class="row"><button type="button" class="btn primary" data-act="sign-ledger">${RINGS()}Sign the ledger</button><button type="button" class="btn link" data-act="back">Not now</button></div>
+        <div class="row"><button type="button" class="btn primary" data-act="sign-ledger">${RINGS()}Sign the agreement</button><button type="button" class="btn link" data-act="back">Not now</button></div>
       </section>`;
     restoreSigFields('ls', keepLs); if (keepConsent && $('#consent-box')) $('#consent-box').checked = true;
   }
@@ -1389,7 +1389,7 @@ async function saveSettings() {
   try {
     await api('POST', `/api/ledgers/${S.ledger.id}/settings`, { binding: !!on, governingLaw: law });
     await refresh(); await loadMe(); renderToolbar();
-    toast(on ? 'The ledger is now legally binding. Sign it to start.' : 'Settings saved.');
+    toast(on ? 'The agreement is now legally binding. Sign it to start.' : 'Settings saved.');
     renderView();
   } catch (e) { toast(e.message || 'Couldn’t save the settings.'); }
 }
@@ -1410,7 +1410,7 @@ async function leaveLedger() {
     await loadMe();
     if (S.ledgers.length) await openLedger(S.ledgers[0].id); else showGate('no-ledgers');
     toast(`You’ve left “${name}”.`);
-  } catch (e) { toast(e.message || 'Couldn’t leave the ledger.'); }
+  } catch (e) { toast(e.message || 'Couldn’t leave the agreement.'); }
 }
 async function signLedger() {
   const sig = readSignature('ls');
@@ -1424,7 +1424,7 @@ async function signLedger() {
     await api('POST', `/api/ledgers/${S.ledger.id}/sign`, Object.assign({ headHash: S.ledger.head }, sig));
     await refresh();
     setView('ledger');
-    toast('You’ve signed the ledger. You can now sign rules in it.');
+    toast('You’ve signed the agreement. You can now sign rules in it.');
   } catch (e) {
     toast(e.message || 'Couldn’t sign just now. Try again.');
     if (e.code === 'stale') { await refresh(); renderView(); }
@@ -1458,7 +1458,7 @@ function autoNotify() {
 }
 function renderToolbar() {
   const sel = $('#ledgerSel');
-  sel.innerHTML = S.ledgers.map(l => `<option value="${esc(l.id)}"${S.ledger && l.id === S.ledger.id ? ' selected' : ''}>${esc(l.name)}</option>`).join('') + '<option value="__new">New ledger…</option>';
+  sel.innerHTML = S.ledgers.map(l => `<option value="${esc(l.id)}"${S.ledger && l.id === S.ledger.id ? ' selected' : ''}>${esc(l.name)}</option>`).join('') + '<option value="__new">New agreement…</option>';
   $('#membersCell').innerHTML = S.ledger ? `<span class="members" title="${esc(S.members.map(m => m.name + ' · ' + m.email).join('\n'))}">${S.members.map(m => m.picture
     ? `<img src="${esc(m.picture)}" alt="${esc(m.name)}" referrerpolicy="no-referrer">` : `<span class="initial-dot" aria-label="${esc(m.name)}">${esc(m.name.slice(0, 1))}</span>`).join('')}<span class="who-names">${esc(listJoin(S.members.map(m => firstName(m.id))))}</span></span>
     <button type="button" class="btn small" data-act="invite">Invite</button>` : '';
@@ -1475,7 +1475,7 @@ async function createLedger() {
     showPanel(null);
     await openLedger(id);
     toast(bind ? `“${name}” is ready and legally binding. Sign it, then invite the others.` : `“${name}” is ready. Invite the others when you like.`);
-  } catch (e) { toast(e.message || 'Couldn’t create the ledger.'); }
+  } catch (e) { toast(e.message || 'Couldn’t create the agreement.'); }
 }
 async function emailInvite() {
   const i = $('#invite-email'), b = $('[data-act="email-invite"]');
@@ -1561,7 +1561,7 @@ async function leaveInvite() {
 async function boot() {
   renderLedger();
   if (pushReady()) navigator.serviceWorker.register('/sw.js').catch(() => {});
-  try { await loadMe(); } catch (e) { if (e.code !== 'signed_out') { $('#gate').hidden = false; $('#gate').innerHTML = `<p class="notice">${esc(e.message || 'The ledger couldn’t load. Reload the page to try again.')}</p>`; } return; }
+  try { await loadMe(); } catch (e) { if (e.code !== 'signed_out') { $('#gate').hidden = false; $('#gate').innerHTML = `<p class="notice">${esc(e.message || 'The agreement couldn’t load. Reload the page to try again.')}</p>`; } return; }
   S.ai = { json: async (prompt, opts = {}) => {
     const out = await api('POST', '/api/check', { prompt }, opts.signal);
     const v = parseLoose(out.text);

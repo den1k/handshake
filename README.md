@@ -1,12 +1,13 @@
 # Handshake
 
-Ledgers of the rules and agreements made between two or more people: partners,
-housemates, family, friends, business partners.
+Agreements between two or more people (partners, housemates, family, friends, business
+partners), each a set of rules on one topic that everyone has agreed to. Every agreement is
+kept as a ledger: rules are added and superseded, never edited or erased.
 
-- Sign in with Google. Create a ledger for each group and invite the others with a
-  one-time link, or have Handshake email one to them. Only a ledger's members can see it.
+- Sign in with Google. Create an agreement for each topic and invite the others with a
+  one-time link, or have Handshake email one to them. Only an agreement's members can see it.
 - Write a rule and press **Check rule**: a fast model finds the rules in force it touches
-  (the ledger narrows to them, with conflicting words marked) and suggests edge cases.
+  (the agreement narrows to them, with conflicting words marked) and suggests edge cases.
   Tick the edge cases you want in the rule, decide whether a conflicting rule is
   superseded, check again or save.
 - A rule comes into effect once every member has agreed. The author agrees by saving;
@@ -15,15 +16,15 @@ housemates, family, friends, business partners.
 - Entries are never edited or deleted; a new entry supersedes or repeals an older one.
   Click any rule's title to see every rule connected to it, earlier and later.
 
-## Legally binding ledgers
+## Legally binding agreements
 
-Tick **Legally binding** when creating a ledger (it's off by default), or switch it on later
-in the ledger's **Settings** (author only, and it can't be switched off again). Then:
+Tick **Legally binding** when creating an agreement (it's off by default), or switch it on later
+in the agreement's **Settings** (author only, and it can't be switched off again). Then:
 
 1. Each member accepts, once per account, a notice about using electronic records and
    signatures.
-2. Each member signs the ledger once: they read the rules in force, type their full legal
-   name and confirm they intend to be legally bound. The signature covers the ledger's
+2. Each member signs the agreement once: they read the rules in force, type their full legal
+   name and confirm they intend to be legally bound. The signature covers the agreement's
    history as they saw it (its current fingerprint) and every rule they sign afterwards.
    Members who join later do the same.
 3. Every new rule is signed the same way, by its author on saving and by each member with
@@ -33,21 +34,21 @@ in the ledger's **Settings** (author only, and it can't be switched off again). 
 Every entry carries a SHA-256 fingerprint chained to the one before it, so changing,
 removing or reordering anything breaks the chain; Settings and every certificate run the
 check. Each consent and signature records the time, IP address, device and Google account.
-Each rule and each ledger has a printable **certificate** (save it as a PDF from the
+Each rule and each agreement has a printable **certificate** (save it as a PDF from the
 browser) with the text, fingerprints and the full audit trail. When everyone has signed
-a rule, each of them is emailed its certificate; signing a ledger emails the signer a copy.
+a rule, each of them is emailed its certificate; signing an agreement emails the signer a copy.
 
-The ledger's author can also require that **every signature is confirmed with a six-digit
+The agreement's author can also require that **every signature is confirmed with a six-digit
 code** emailed to the signer's Google address (Settings › Confirming signatures). Codes
 last ten minutes, work once, and stop working after five wrong tries. Each certificate
 records how a signature was confirmed and when the signer last signed in with Google.
 
-Members can **leave** a ledger from its Settings (the author can't). New rules then don't
+Members can **leave** an agreement from its Settings (the author can't). New rules then don't
 need them; everything they signed or agreed to stays on record.
 
 This follows the usual requirements for electronic signatures (intent to sign, consent to
 sign electronically, signatures tied to the exact record, tamper evidence, a copy for each
-signer), but whether a given ledger is enforceable depends on what it says and where you
+signer), but whether a given agreement is enforceable depends on what it says and where you
 are. Have a lawyer review it before relying on it.
 
 ### Email
@@ -66,7 +67,7 @@ email sent or failed is logged in the database. For Gmail, make an
 Handshake is an installable web app. In Chrome or Edge, use the install button in the
 address bar; on Android, "Add to Home screen"; on iPhone and iPad, Share › Add to Home Screen.
 Once you're signed in, each device asks whether Handshake may send notifications (Firefox
-and Safari ask on your first click). Allow it to hear when a rule in one of your ledgers is
+and Safari ask on your first click). Allow it to hear when a rule in one of your agreements is
 added, agreed to, signed or repealed. Whoever does it isn't notified. To stop them, block
 notifications for the site in the browser's settings. On iPhone and iPad this only works from
 the Home Screen app (iOS 16.4 or later).
@@ -139,7 +140,7 @@ for `localhost`; anything else needs `https`.
   host names, are refused. The page can't be framed by another site.
 - Opening an invite link only shows the invitation; joining takes a click.
 - Each account is rate-limited (120 changes a minute, 20 rule checks per 10 minutes,
-  30 invites an hour). Only ledger members can run checks, and prompts are capped.
+  30 invites an hour). Only agreement members can run checks, and prompts are capped.
 
 ### Deploying to a server
 
