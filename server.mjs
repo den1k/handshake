@@ -489,17 +489,21 @@ function notifyLedger(lid, me, eid, agreed) {
   if (!agreed) body = repeal ? `${me.name} proposed repealing ${targets}` : `${me.name} added ${label(eid)}${targets ? `, replacing ${targets}` : ''}`;
   else {
     const has = new Set(q.agreements.all(lid).filter(a => a.entry_id === eid).map(a => a.user_id));
-    const done = JSON.parse(ent.required).every(u => has.has(u)), signed = !!l.binding_since;
+    const done = neededFor(lid, ent, has).every(u => has.has(u)), signed = !!l.binding_since;
     body = `${me.name} ${signed ? 'signed' : 'agreed to'} ${repeal ? `${signed ? 'the repeal of' : 'repeal'} ${targets}` : label(eid)}.${done ? ` Everyone has ${signed ? 'signed' : 'agreed'}.` : ''}`;
   }
   notify(q.members.all(lid).map(m => m.id).filter(id => id !== me.id), { title: l.name, body, url: `/?l=${encodeURIComponent(lid)}` });
 }
+// Who an entry needs: the members it required who are still members, plus anyone who agreed before leaving.
+// Leaving stops blocking pending entries; what someone agreed to or signed stays on record.
+const neededFor = (lid, ent, agreed) => JSON.parse(ent.required).filter(u => agreed.has(u) || q.member.get(lid, u));
+const signersOf = (lid, eid) => new Set(q.entrySigs.all(lid).filter(s => s.entry_id === eid).map(s => s.user_id));
+const allSigned = (lid, eid) => { const ent = q.entry.get(eid), s = signersOf(lid, eid); return !!ent && neededFor(lid, ent, s).every(u => s.has(u)); };
 // When the last required signature lands, everyone gets the certificate by email.
 function mailIfComplete(lid, eid) {
   const ent = q.entry.get(eid);
-  if (!ent) return;
-  const req = JSON.parse(ent.required), sigs = q.entrySigs.all(lid).filter(s => s.entry_id === eid);
-  if (!req.every(u => sigs.some(s => s.user_id === u))) return;
+  if (!ent || !allSigned(lid, eid)) return;
+  const req = neededFor(lid, ent, signersOf(lid, eid));
   const l = q.ledger.get(lid), doc = JSON.parse(q.fullEntries.all(lid).find(x => x.id === eid).doc), n = entryNumber(lid, eid);
   sendMail({ to: req.map(u => (q.user.get(u) || {}).email), subject: `Signed by everyone: § ${n} · ${doc.title || 'Untitled'} (${l.name})`,
     text: `Everyone has signed § ${n} of “${l.name}”. It is now in effect.\n\n${doc.text}\n\nThe certificate is attached as the HTML version of this email, and online at ${BASE_URL}/certificate/${lid}/${eid}`,
@@ -511,6 +515,7 @@ function ledgerState(lid, me) {
   const head = headOf(lid);
   const sigs = q.entrySigs.all(lid);
   const hashes = new Map(q.hashes.all(lid).map(h => [h.entry_id, h.hash]));
+  const members = q.members.all(lid), ents = q.entries.all(lid);
   return {
     ledger: { id: l.id, name: l.name, createdBy: l.created_by, createdAt: l.created_at, binding: !!l.binding_since, bindingSince: l.binding_since, governingLaw: l.governing_law, verifyEmail: !!l.verify_email,
       head: head.hash, headCount: head.count, statement: l.binding_since ? ledgerStatement(l, head.count, head.hash) : '' },
@@ -520,8 +525,11 @@ function ledgerState(lid, me) {
     consent: { version: ESIGN_VERSION, notice: ESIGN_NOTICE, given: !!q.consent.get(me.id, ESIGN_VERSION) },
     ledgerSignatures: q.ledgerSigs.all(lid).map(s => ({ userId: s.user_id, at: s.at, typedName: s.typed_name, entryCount: s.entry_count })),
     signatures: sigs.map(s => ({ entryId: s.entry_id, userId: s.user_id, at: s.at, typedName: s.typed_name })),
-    members: q.members.all(lid).map(m => ({ id: m.id, name: m.name, email: m.email, picture: m.picture, role: m.role, joinedAt: m.joined_at })),
-    entries: q.entries.all(lid).map(e => Object.assign(JSON.parse(e.doc), { id: e.id, authorId: e.author_id, createdAt: e.created_at, required: JSON.parse(e.required), hash: hashes.get(e.id) || '' })),
+    members: members.map(m => ({ id: m.id, name: m.name, email: m.email, picture: m.picture, role: m.role, joinedAt: m.joined_at })),
+    // People named in the history who have since left, so they can still be shown by name.
+    formerMembers: [...new Set(ents.flatMap(e => [e.author_id, ...JSON.parse(e.required)]))].filter(u => !members.some(m => m.id === u))
+      .map(u => q.user.get(u)).filter(Boolean).map(u => ({ id: u.id, name: u.name })),
+    entries: ents.map(e => Object.assign(JSON.parse(e.doc), { id: e.id, authorId: e.author_id, createdAt: e.created_at, required: JSON.parse(e.required), hash: hashes.get(e.id) || '' })),
     agreements: q.agreements.all(lid).map(a => ({ entryId: a.entry_id, userId: a.user_id, at: a.at })),
   };
 }
@@ -558,9 +566,8 @@ function certificateHtml(lid, eid) {
   if (eid) {
     const ent = q.fullEntries.all(lid).find(x => x.id === eid), h = ent && q.entryHash.get(eid);
     if (!ent) return null;
-    const doc = JSON.parse(ent.doc), req = JSON.parse(ent.required);
-    const sigs = q.entrySigs.all(lid).filter(s => s.entry_id === eid);
-    const done = req.every(u => sigs.some(s => s.user_id === u));
+    const doc = JSON.parse(ent.doc), signers = signersOf(lid, eid);
+    const done = neededFor(lid, ent, signers).every(u => signers.has(u));
     title = `§ ${h.seq} · ${doc.title || 'Untitled'}`;
     body = `<p class="state ${done ? 'ok' : 'wait'}">${done ? 'Signed by every required member' : 'Not yet signed by every required member'}</p>
       <h2>Text as recorded</h2><blockquote>${e(doc.text)}</blockquote>
@@ -801,7 +808,10 @@ const server = http.createServer(async (req, res) => {
       // Leaving: members only (the author stays). Past signatures and agreements stay on record.
       if (req.method === 'POST' && parts[3] === 'leave' && parts.length === 4) {
         if (q.member.get(lid, me.id).role === 'owner') return send(res, 409, { code: 'owner', message: 'The agreement’s author can’t leave it.' });
+        // Rules that were only waiting on this member come into effect; in a binding agreement, mail their certificates.
+        const waiting = q.ledger.get(lid).binding_since ? q.entries.all(lid).filter(e => !allSigned(lid, e.id)) : [];
         q.leave.run(lid, me.id);
+        for (const e of waiting) mailIfComplete(lid, e.id);
         return send(res, 200, { ok: true });
       }
 

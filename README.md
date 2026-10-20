@@ -43,8 +43,9 @@ code** emailed to the signer's Google address (Settings › Confirming signature
 last ten minutes, work once, and stop working after five wrong tries. Each certificate
 records how a signature was confirmed and when the signer last signed in with Google.
 
-Members can **leave** an agreement from its Settings (the author can't). New rules then don't
-need them; everything they signed or agreed to stays on record.
+Members can **leave** an agreement from its Settings (the author can't). Rules then stop waiting
+for them, new and pending alike; everything they signed or agreed to stays on record, and they're
+still shown by name, with a grey line through the rules they agreed to.
 
 This follows the usual requirements for electronic signatures (intent to sign, consent to
 sign electronically, signatures tied to the exact record, tamper evidence, a copy for each

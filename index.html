@@ -554,10 +554,10 @@ function richText(t, info) {
 }
 
 /* ---------- state ---------- */
-const S = { user: null, me: null, ledgers: [], ledger: null, members: [], signIn: true, view: 'ledger', consent: null, ledgerSigs: [], sigs: [], signing: null,
+const S = { user: null, me: null, ledgers: [], ledger: null, members: [], former: [], signIn: true, view: 'ledger', consent: null, ledgerSigs: [], sigs: [], signing: null,
   status: 'connecting', loaded: false, rules: [], agr: [], filter: 'all', q: '', newest: false,
   open: new Set(), profiles: {}, pendingJump: null, showAll: false, scrolled: false, focus: null, ai: null };
-let L = { list: [], byId: new Map() };
+let L = { list: [], byId: new Map(), lanes: [] };
 const T = { busy: false, busyAt: 'top', ctl: null, progress: '', error: '', saving: false, discardArm: false, scrollTo: null };
 
 function blankDraft() {
@@ -582,6 +582,12 @@ function derive() {
   const byId = new Map();
   list.forEach((r, i) => { r.n = i + 1; r.by = []; r.pendingBy = []; r.agreed = new Map(); r.required = arr(r.required); byId.set(r.id, r); });
   for (const a of S.agr) { const r = byId.get(a.entryId); if (r && !r.agreed.has(a.userId)) r.agreed.set(a.userId, a.at); }
+  // Someone who leaves stops blocking: an entry needs the members it required who are still here, plus anyone
+  // who agreed before leaving (their agreement stays on record).
+  for (const r of list) {
+    r.requiredAll = r.requiredAll || r.required;
+    r.required = r.requiredAll.filter(u => r.agreed.has(u) || S.members.some(m => m.id === u));
+  }
   for (const r of list) {
     r.effective = r.required.length > 0 && r.required.every(u => r.agreed.has(u));
     r.effectiveAt = r.effective ? r.required.map(u => r.agreed.get(u)).sort().pop() : '';
@@ -592,7 +598,11 @@ function derive() {
     r.status = !r.effective ? 'pending' : r.kind === 'repeal' ? 'repeal'
       : r.by.length ? (r.by.some(x => x.kind === 'repeal') ? 'repealed' : 'superseded') : 'force';
   }
-  L = { list, byId };
+  // Lines in the order people joined; someone who has left takes the place of the first entry that needed them.
+  const firstNeed = id => { const r = list.find(x => x.requiredAll.includes(id)); return r ? str(r.createdAt) : '~'; };
+  const lanes = S.members.map(m => ({ m, at: str(m.joinedAt) })).concat(S.former.map(m => ({ m, at: firstNeed(m.id) })))
+    .sort((a, b) => a.at.localeCompare(b.at)).map(x => x.m);
+  L = { list, byId, lanes };
 }
 const inForce = () => L.list.filter(r => r.status === 'force' && r.kind !== 'repeal');
 
@@ -644,7 +654,9 @@ function nameOf(id) {
   if (!id) return 'someone';
   if (id === S.me) return 'you';
   const m = S.members.find(x => x.id === id);
-  return (m && m.name) || 'a former member';
+  if (m) return m.name;
+  const f = S.former.find(x => x.id === id);
+  return f ? `${f.name} (left)` : 'a former member';
 }
 const firstName = id => id === S.me ? 'You' : nameOf(id).split(/\s+/)[0];
 const fmtWhen = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
@@ -705,7 +717,7 @@ function renderLedger() {
   nb.textContent = draftHasContent() ? 'Resume draft' : 'New entry';
   $('#tools').hidden = !list.length;
   $('#ledger').classList.toggle('newest', S.newest);
-  $('#ledger').style.setProperty('--lanes', Math.max(2, S.members.length));
+  $('#ledger').style.setProperty('--lanes', Math.max(2, S.members.length + S.former.length));
   const head = $('#lhead'), bar = $('#filterbar'), rowsEl = $('#rows'), nextEl = $('#next'), foot = $('#lfoot');
   const only = h => { head.innerHTML = ''; bar.hidden = true; rowsEl.innerHTML = h; nextEl.innerHTML = ''; foot.innerHTML = ''; };
   if (!S.loaded) return only(`<p class="notice">Opening the agreement…</p>`);
@@ -789,15 +801,16 @@ function agreementsHTML(r) {
 /* Members' lines, in the colours of the subway map, in the order they joined. */
 const LINE_COLORS = ['#0080c7', '#f38400', '#009a63', '#dc1440', '#af3788', '#fdd200', '#74b02e', '#979799', '#996633'];
 const lineColor = id => { const i = S.members.findIndex(m => m.id === id); return i < 0 ? 'var(--old)' : LINE_COLORS[i % LINE_COLORS.length]; };
-// A member's line runs through a row if they were a member when it was written (or it needs them).
-const onLine = (m, r) => !!r && (str(m.joinedAt) <= str(r.createdAt) || r.required.includes(m.id));
+// A member's line runs through a row if they were a member when it was written (or it needs them). Someone who
+// has left keeps a grey line through the rows they agreed to, after everyone still here.
+const onLine = (m, r) => !!r && (S.former.includes(m) ? r.agreed.has(m.id) : str(m.joinedAt) <= str(r.createdAt) || r.required.includes(m.id));
 
 /* The lane beside a rule: each member's line, and the rule as a station. Everyone agreed: one pill across
    the lines (a transfer station). Otherwise members side by side who agreed share a pill, anyone alone gets
    a stop, and a member still to agree has a dashed line. prev/next are the rows shown above and below. */
 function laneHTML(r, prev, next) {
   const x = i => 16 + 15 * i;
-  const on = S.members.map((m, i) => ({ m, i })).filter(({ m }) => onLine(m, r));
+  const on = L.lanes.map((m, i) => ({ m, i })).filter(({ m }) => onLine(m, r));
   const lines = on.map(({ m, i }) => {
     const wait = r.status === 'pending' && r.required.includes(m.id) && !r.agreed.has(m.id);
     const cls = ['ln', !onLine(m, prev) && 'top', !onLine(m, next) && 'bot', wait && 'wait'].filter(Boolean).join(' ');
@@ -1574,7 +1587,7 @@ async function refresh() {
   const key = JSON.stringify(st);
   if (key === lastKey) return;
   lastKey = key;
-  S.ledger = st.ledger; S.members = st.members; S.rules = st.entries; S.agr = st.agreements; S.loaded = true;
+  S.ledger = st.ledger; S.members = st.members; S.former = st.formerMembers || []; S.rules = st.entries; S.agr = st.agreements; S.loaded = true;
   S.consent = st.consent; S.ledgerSigs = st.ledgerSignatures || []; S.sigs = st.signatures || []; S.myEmail = st.myEmail; S.mail = st.mail;
   renderToolbar();
   if (S.view === 'ledger') onData(); else { derive(); renderView(); }
@@ -1586,7 +1599,7 @@ async function openLedger(id) {
   if (S.ledger && S.ledger.id === id && S.loaded) return;
   if (drafting()) closeComposer();
   S.ledger = { id, name: (S.ledgers.find(l => l.id === id) || {}).name || '' };
-  S.rules = []; S.agr = []; S.members = []; S.loaded = false; S.scrolled = false; S.focus = null; S.showAll = false; lastKey = '';
+  S.rules = []; S.agr = []; S.members = []; S.former = []; S.loaded = false; S.scrolled = false; S.focus = null; S.showAll = false; lastKey = '';
   S.ledgerSigs = []; S.sigs = []; S.signing = null; S.view = 'ledger'; $('#view').hidden = true; $('#ledger').hidden = false;
   D = loadDraft() || blankDraft();
   try { localStorage.setItem('handshake.ledger', id); } catch (e) {}
